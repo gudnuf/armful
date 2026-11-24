@@ -5,13 +5,15 @@
 right size is kept and only hashed). Videos larger than 500 MB are skipped and
 listed. Stdlib only.
 
-usage: python3 -I pipeline/scan/download.py LISTING.tsv DEST_DIR MANIFEST.tsv [--seed]
+usage: python3 -I pipeline/scan/download.py LISTING.tsv DEST_DIR MANIFEST.tsv [--seed] [--big ID[,ID]]
 Writes MANIFEST.tsv (id, name, size, sha256, subfolder) and skipped.tsv /
 failed.tsv next to it, checkpointed every 25 files (atomic rewrite), so a
 stopped run resumes: ids in the manifest whose file is on disk at that size,
 and ids in skipped.tsv, are not touched again (no network). Interrupted
 downloads only ever leave NAME.part, never a truncated final file.
 --seed: no network; hash complete files already on disk into the manifest.
+--big ID[,ID]: fetch these ids whatever their size, even if skipped.tsv lists
+them (the cap stays for every other file).
 """
 import concurrent.futures as cf
 import hashlib
@@ -52,7 +54,7 @@ def remote_size(fid):
         return int(r.headers.get("Content-Length", "-1"))
 
 
-def fetch(row, dest_root):
+def fetch(row, dest_root, big=frozenset()):
     fid, name, mime, sub = row
     d = os.path.join(dest_root, sub) if sub else dest_root
     os.makedirs(d, exist_ok=True)
@@ -61,7 +63,7 @@ def fetch(row, dest_root):
     for attempt in range(5):
         try:
             size = remote_size(fid)
-            if mime.startswith("video/") and size > VIDEO_CAP:
+            if mime.startswith("video/") and size > VIDEO_CAP and fid not in big:
                 return ("skipped", fid, name, size, "", sub)
             if os.path.exists(path) and os.path.getsize(path) == size:
                 return ("ok", fid, name, size, sha256(path), sub)
@@ -110,6 +112,12 @@ def write_tsv(path, rows, last="info"):
 def main():
     listing, dest, manifest = sys.argv[1:4]
     seed = "--seed" in sys.argv  # hash files already on disk into the manifest, no network
+    big = set()
+    if "--big" in sys.argv:
+        i = sys.argv.index("--big")
+        if i + 1 >= len(sys.argv) or sys.argv[i + 1].startswith("--"):
+            sys.exit("--big needs a comma-separated list of Drive ids")
+        big = {x for x in sys.argv[i + 1].split(",") if x}
     rows = []
     with open(listing, encoding="utf-8") as f:
         next(f)
@@ -121,12 +129,15 @@ def main():
     done = load_tsv(manifest)  # id -> [id, name, size, sha256, sub]
     skipped = load_tsv(skipped_p)
     results, todo = [], []
+    unknown = big - {r[0] for r in rows}
+    if unknown:
+        sys.exit(f"--big: not in the listing: {','.join(sorted(unknown))}")
     for r in rows:
         fid, name, _mime, sub = r
         path = os.path.join(dest, sub, safe(name)) if sub else os.path.join(dest, safe(name))
         if fid in done and os.path.exists(path) and os.path.getsize(path) == int(done[fid][2]):
             results.append(("ok", fid, name, int(done[fid][2]), done[fid][3], sub))
-        elif fid in skipped:
+        elif fid in skipped and fid not in big:
             results.append(("skipped", fid, name, int(skipped[fid][2]), "", sub))
         elif seed and os.path.exists(path):
             # final names only appear via os.replace after a full, size-checked read
@@ -145,7 +156,7 @@ def main():
     t0 = time.time()
     if todo and not seed:
         with cf.ThreadPoolExecutor(WORKERS) as ex:
-            futs = [ex.submit(fetch, r, dest) for r in todo]
+            futs = [ex.submit(fetch, r, dest, big) for r in todo]
             for i, fu in enumerate(cf.as_completed(futs), 1):
                 res = fu.result()
                 results.append(res)

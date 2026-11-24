@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Cluster face embeddings into people.
 
-usage: python -I pipeline/scan/cluster.py [--thresh 0.65]
+usage: python -I pipeline/scan/cluster.py [--thresh 0.65] [--attach]
 Core faces (good detection, big enough) are clustered with agglomerative
 average-linkage on cosine distance. Weaker faces are then attached to the
 nearest cluster centroid if similar enough (marked weak=1). Faces that upright.py could
 not orient or had to drop (fix=drop) are left out altogether. Writes
 data/clusters.tsv (face_id, cluster, sim_to_centroid, weak) and
 data/clusters.json (summary per cluster).
+
+--attach: add newly scanned faces without re-clustering. Every face already in
+clusters.tsv keeps its cluster, sim and weak flag, and centroids.npy is kept as
+it is; a new face joins its nearest centroid by the weak-face rule above
+(marked weak=1) or stays unclustered. Use it to add a few files to a collection
+whose people are already reviewed: a full run lets the new faces nudge old
+clusters (every file can gain or lose someone), this never touches old files.
 """
 import json
 import os
@@ -43,11 +50,51 @@ def load_faces():
     return rows, np.load(os.path.join(fc.DATA, "emb.npy"))
 
 
+def attach(rows, E):
+    """New faces onto the existing clusters; old assignments and centroids unchanged."""
+    old = {}
+    with open(os.path.join(fc.DATA, "clusters.tsv"), encoding="utf-8") as f:
+        next(f)
+        for line in f:
+            fid, c, s, w = line.rstrip("\n").split("\t")
+            old[fid] = (int(c), s, int(w))
+    cent = np.load(os.path.join(fc.DATA, "centroids.npy"))
+    known = {r["face_id"] for r in rows}
+    gone = [fid for fid in old if fid not in known]
+    if gone:
+        sys.exit(f"--attach: {len(gone)} faces in clusters.tsv are no longer in faces.tsv (e.g. {gone[0]}); run a full cluster.py")
+    out, added, joined = [], 0, 0
+    for i, r in enumerate(rows):
+        if r["face_id"] in old:
+            c, s, w = old[r["face_id"]]
+            out.append((r["face_id"], c, s, w))
+            continue
+        added += 1
+        c, s, w = -1, 0.0, 0
+        if len(cent) and not r["drop"] and (r["oriented"] or not r["crop"]):
+            sims = E[i] @ cent.T
+            j = int(np.argmax(sims))
+            if sims[j] >= ATTACH_SIM and r["det"] >= 0.5:
+                c, s, w = j, float(sims[j]), 1
+                joined += 1
+        out.append((r["face_id"], c, f"{s:.4f}", w))
+    tmp = os.path.join(fc.DATA, "clusters.tsv.tmp")
+    with open(tmp, "w") as f:
+        f.write("face_id\tcluster\tsim\tweak\n")
+        for fid, c, s, w in out:
+            f.write(f"{fid}\t{c}\t{s}\t{w}\n")
+    os.replace(tmp, os.path.join(fc.DATA, "clusters.tsv"))
+    print(json.dumps(dict(n_faces=len(rows), kept=len(rows) - added, new=added, new_joined=joined, n_clusters=len(cent)), indent=1))
+    print("clusters.json is not updated by --attach")
+
+
 def main():
     thresh = 0.65
     if "--thresh" in sys.argv:
         thresh = float(sys.argv[sys.argv.index("--thresh") + 1])
     rows, E = load_faces()
+    if "--attach" in sys.argv:
+        return attach(rows, E)
     core = np.array([r["det"] >= CORE_DET and r["side"] >= CORE_SIDE and not r["drop"] and r["oriented"] for r in rows])
     ci = np.where(core)[0]
     labels = np.full(len(rows), -1)

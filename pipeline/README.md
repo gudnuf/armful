@@ -90,6 +90,20 @@ python -I pipeline/gallery/verify_thumbs.py --collection collections/<slug>
 python -I pipeline/gallery/verify_faces.py --collection collections/<slug>
 ```
 
+Adding a few files to a collection whose people are already reviewed:
+
+- `download.py` skips videos over 500 MB and lists them in `skipped.tsv`.
+  `--big ID[,ID]` fetches just those ids anyway; the cap stays for the rest.
+  Big files play the same as the others: the page streams video through
+  Drive's own player (`/file/d/ID/preview`), not the download URL.
+- `scan.py` only scans files it has no cache for.
+- `cluster.py --attach` keeps every face already in `clusters.tsv` where it
+  is and keeps `centroids.npy` unchanged. A new face joins its nearest
+  existing cluster by the weak-face rule, or stays unclustered. A full
+  `cluster.py` run lets the new faces nudge the old clusters, so a file
+  already on the wall can gain or lose a person. `--attach` never changes
+  an old file.
+
 Everything the gallery scripts write is private, so a destination inside
 this checkout (after following symlinks) is refused unless git ignores it:
 `--out dist/<slug>` is fine, `--out pipeline/gallery` is not. Destinations
