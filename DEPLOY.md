@@ -38,8 +38,10 @@ npx wrangler@4.167.0 pages project create armful --production-branch main
   at it and source it with `set -a; . "$ARMFUL_CF_ENV"; set +a` (never `cat`
   it, never `echo` the token, never pass it on a command line).
 - **Collection passphrase.** Lives in your local passphrase file, outside
-  the repo. It never goes in git, a chat or a command argument. It must be at least 16 characters: a shorter
-  secret is treated as unset and the collection answers 503.
+  the repo. It never goes in git, a chat or a command argument. It must be at least 6 characters (a shorter
+  secret is treated as unset and the collection answers 503); a longer
+  passphrase is stronger. Turn on the Cloudflare rate-limit rule for
+  `POST */__gate`.
 
 ## 1. Set the collection secret (once, and whenever the passphrase changes)
 
@@ -84,6 +86,25 @@ From the repo root, always (see the top). `--branch main` makes it the
 production deployment on armful.photos.
 
 ## 4. Check it (every deploy)
+
+After every deploy: `bin/smoke.sh`, then `bin/smoke-browser.mjs`. Both read
+the passphrase from `ARMFUL_PASSWORD` only:
+
+```bash
+export ARMFUL_PASSWORD="$(cat PASSPHRASE_FILE)"
+bin/smoke.sh https://armful.photos bnf-ytt-spain-2026
+node bin/smoke-browser.mjs https://armful.photos bnf-ytt-spain-2026
+unset ARMFUL_PASSWORD
+```
+
+`bin/smoke-browser.mjs` drives headless Chrome (set `ARMFUL_CHROME_LOCK` to
+hold a lockfile while it runs) at 390x844 and 1440x900: home, door, typed
+login, one tile per `data.json` file, the first screen of thumbnails, the
+people list's faces, a face filter and the hold, the previewer's large photo.
+It fails on any console error, uncaught exception, failed load, CSP violation
+or request to a host other than the site, `drive.google.com` and
+`*.googleusercontent.com`; a third-party script an ad blocker stopped is
+still reported ("third-party attempted").
 
 `bin/smoke.sh` runs all of these and prints one `ok` / `FAIL` line each. The
 passphrase comes only from the environment, read from your local passphrase
@@ -131,6 +152,10 @@ Check each of these once after setup and after any project change:
 4. **pages.dev to the apex.** A Bulk Redirect from `armful.pages.dev` to
    `https://armful.photos` (preserve path and query). Preview hosts
    (`*.armful.pages.dev`) already send `X-Robots-Tag: noindex` via `_headers`.
+5. **Web Analytics off.** Pages, `armful`, Settings, Web Analytics: off (it
+   injects a third-party beacon, `static.cloudflareinsights.com`, into every
+   HTML page; the collection page's CSP and the door's CSP refuse it, and
+   `bin/smoke-browser.mjs` fails on it).
 
 ## The opt-out loop
 

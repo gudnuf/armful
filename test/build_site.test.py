@@ -335,7 +335,9 @@ TFACES_TURNS = TFACES + [("w1", "f7", 0, 0.5), ("w2", "f7", 1, 8.5)]
 TFILES = [("f1", "photo"), ("f2", "photo"), ("f3", "photo"), ("f4", "photo"), ("f5", "video"), ("f6", "photo")]
 
 
-def make_timed_scan(tmp, faces=TFACES, files=TFILES):
+def make_timed_scan(tmp, faces=TFACES, files=TFILES, sizes=None):
+    """sizes: file key -> (w, h) as the scan recorded it (default 1000 x 800)."""
+    sizes = sizes or {}
     scan, footage = os.path.join(tmp, "scan"), os.path.join(tmp, "footage")
     data = os.path.join(scan, "data")
     os.makedirs(data, exist_ok=True)
@@ -344,7 +346,7 @@ def make_timed_scan(tmp, faces=TFACES, files=TFILES):
     write_tsv(
         os.path.join(data, "photos.tsv"),
         ["file_key", "rel", "kind", "drive_id", "w", "h"],
-        [(k, f"{k}.{ext[kind]}", kind, f"FAKE_ID_{k[1:]}", 1000, 800) for k, kind in files],
+        [(k, f"{k}.{ext[kind]}", kind, f"FAKE_ID_{k[1:]}", *sizes.get(k, (1000, 800))) for k, kind in files],
     )
     kind_of = dict(files)
     rows = [
@@ -511,6 +513,105 @@ class TimeAndFaces(unittest.TestCase):
 
     def test_example_collection_zone_is_utc(self):
         self.assertEqual(load(os.path.join(ROOT, "collections", "example", "collection.json"))["tz"], "UTC")
+
+
+class Sizes(unittest.TestCase):
+    """A file the scan recorded without a size (w or h <= 0) is sized from the file itself, or left out."""
+
+    # a stand-in ffprobe: f5 a portrait phone video stored landscape with a -90 display matrix,
+    # f7 the older `rotate` tag; any other file has no video stream. Both calls (capture time and
+    # size) get the same JSON: each reads only its own part.
+    FFPROBE = """#!/bin/sh
+case "$*" in
+  *f5.mov*) echo '{"format":{"tags":{"creation_time":"2026-05-05T18:30:00Z"}},"streams":[{"codec_type":"video","width":1920,"height":1440,"side_data_list":[{"side_data_type":"Display Matrix","rotation":-90}]}]}' ;;
+  *f7.mov*) echo '{"streams":[{"codec_type":"video","width":1280,"height":720,"tags":{"rotate":"270"}}]}' ;;
+  *) echo '{"streams":[]}' ;;
+esac
+"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.ffprobe = os.path.join(self.tmp, "fake-ffprobe")
+        with open(self.ffprobe, "w") as f:
+            f.write(self.FFPROBE)
+        os.chmod(self.ffprobe, 0o755)
+
+    def scan(self, sizes, files=TFILES + [("f7", "video")]):
+        scan, footage = make_timed_scan(self.tmp, TFACES, files, sizes)
+        self.drive = os.path.join(footage, "drive")
+        self.env = dict(os.environ, ARMFUL_SCAN_ROOT=scan, ARMFUL_FOOTAGE=footage)
+        self.env.pop("ARMFUL_COLLECTION", None)
+        for k in ("f5", "f7"):
+            open(os.path.join(self.drive, f"{k}.mov"), "wb").close()
+
+    def build(self, col, *args, ok=True):
+        r = subprocess.run([sys.executable, "-I", BUILD, "--collection", col, *args], env=self.env,
+                           capture_output=True, text=True, cwd=self.tmp)
+        (self.assertEqual if ok else self.assertNotEqual)(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
+    def jpeg(self, name, orientation=1):
+        exif = Image.Exif()
+        if orientation != 1:
+            exif[274] = orientation
+        Image.new("RGB", (8, 6), (120, 130, 125)).save(os.path.join(self.drive, name), "JPEG", exif=exif)
+
+    def check_sizes(self, d):
+        for f in d["files"]:
+            self.assertTrue(isinstance(f["w"], int) and isinstance(f["h"], int) and f["w"] > 0 and f["h"] > 0, f)
+        for p in d["people"]:
+            self.assertIn(p["id"], d["files"][p["rep"]["f"]]["p"])
+            self.assertTrue(all(v >= 0 for v in p["rep"]["box"]), p)
+
+    def test_missing_sizes_read_from_the_files(self):
+        self.scan({"f3": (0, 0), "f4": ("", ""), "f5": (0, 0), "f7": (0, 1)})
+        self.jpeg("f3.jpg", orientation=6)  # stored 8 x 6, shown turned a quarter: 6 x 8
+        self.jpeg("f4.jpg")  # plain: 8 x 6
+        col = make_collection(self.tmp, [])
+        self.build(col, "--ffprobe", self.ffprobe)
+        d = load(os.path.join(col, "dist", "data.json"))
+        by = {f["i"]: f for f in d["files"]}
+        self.assertEqual(len(d["files"]), 7)
+        self.assertEqual((by["FAKE_ID_3"]["w"], by["FAKE_ID_3"]["h"]), (6, 8))
+        self.assertEqual((by["FAKE_ID_4"]["w"], by["FAKE_ID_4"]["h"]), (8, 6))
+        self.assertEqual((by["FAKE_ID_5"]["w"], by["FAKE_ID_5"]["h"]), (1440, 1920))  # rotation -90
+        self.assertEqual((by["FAKE_ID_7"]["w"], by["FAKE_ID_7"]["h"]), (720, 1280))  # rotate 270
+        self.assertEqual((by["FAKE_ID_1"]["w"], by["FAKE_ID_1"]["h"]), (1000, 800))  # the scan's size stands
+        self.check_sizes(d)
+        rep = load(os.path.join(col, "state", "build_report.json"))
+        self.assertEqual(rep["dropped"], [])
+        self.assertEqual(sorted((e["drive_id"], e["w"], e["h"]) for e in rep["sizes_probed"]),
+                         [("FAKE_ID_3", 6, 8), ("FAKE_ID_4", 8, 6), ("FAKE_ID_5", 1440, 1920), ("FAKE_ID_7", 720, 1280)])
+
+    def test_unknown_size_is_left_out_and_reported(self):
+        self.scan({})
+        col = make_collection(self.tmp, [])
+        self.build(col, "--ffprobe", self.ffprobe)  # all sizes known: the reference build
+        d0 = load(os.path.join(col, "dist", "data.json"))
+        ids0 = load(os.path.join(col, "state", "person_faces.json"))
+        # f1 (persons A and C) has no size and no file; f5 (a video) no size and no ffprobe to read one
+        self.scan({"f1": (0, 0), "f5": (0, 0)})
+        r = self.build(col, "--ffprobe", os.path.join(self.tmp, "no-such-ffprobe"))
+        self.assertIn("left out", r.stderr)
+        d = load(os.path.join(col, "dist", "data.json"))
+        self.assertEqual(sorted(f["i"] for f in d["files"]), ["FAKE_ID_2", "FAKE_ID_3", "FAKE_ID_4", "FAKE_ID_6", "FAKE_ID_7"])
+        self.check_sizes(d)
+        rep = load(os.path.join(col, "state", "build_report.json"))
+        self.assertEqual(sorted(e["drive_id"] for e in rep["dropped"]), ["FAKE_ID_1", "FAKE_ID_5"])
+        self.assertEqual(rep["sizes_probed"], [])
+        # person ids do not move: the id map is the faces', not the files'
+        self.assertEqual(load(os.path.join(col, "state", "person_faces.json")), ids0)
+        of = lambda face: next(int(pid) for pid, fids in ids0.items() if face in fids)  # noqa: E731
+        n = {p["id"]: p["n"] for p in d["people"]}
+        self.assertNotIn(of("c1"), n, "C was only on the dropped photo")
+        self.assertEqual(n[of("a1")], 1, "A keeps the photo that is still there")
+        self.assertEqual(n[of("b1")], {p["id"]: p["n"] for p in d0["people"]}[of("b1")])
+        # with the sizes back, the files come back
+        self.scan({})
+        self.build(col, "--ffprobe", self.ffprobe)
+        self.assertEqual(load(os.path.join(col, "dist", "data.json"))["files"], d0["files"])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
-// The hold: tap faces to hold them; two or more read "together" (photos with all of them) or
-// "any" (photos with any of them), the pair toggles between the two; every list count is the
-// count you would get by tapping that face; the URL keeps the hold.
+// The hold: tap faces to hold them. The pill shows the held faces, "N photos" and ×; two or more
+// mean together (photos with all of them), and a tap on the faces switches to any (photos with
+// any of them) without a word on screen. Every list count is the count you would get by tapping
+// that face; the URL keeps the hold.
 // Run: node --test test/hold.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -36,6 +37,9 @@ const openMore = async () => {
   assert.ok(await b.until(`document.getElementById('listMore').getClientRects().length > 0`), "more open");
 };
 const face = async (pid) => { await openList(); if (D.people.find((p) => p.id === pid).x) await openMore(); await tap(`#list .face[data-pid="${pid}"]`); };
+const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
+// no hint anywhere in the panel (the empty state's one plain sentence is checked on its own)
+const noHints = async () => assert.doesNotMatch(await b.evalJs(`document.getElementById('panel').textContent`), NO_HINTS);
 const filesWith = (pred) => D.files.map((f, i) => [f, i]).filter(([f]) => pred(f.p)).map(([, i]) => i);
 
 before(async () => {
@@ -50,20 +54,17 @@ after(async () => { await b?.close(); await srv?.close(); });
 
 test("phone: one held, together, any, the empty state, letting go, clearing", async () => {
   await b.load(390, 844, true, "/example/", READY);
-  assert.equal(await visible("#hold"), false);
+  assert.equal(await visible("#pair"), false);
 
   // one held
   await face(1);
   assert.equal(await hash(), "#p=1");
   const with1 = filesWith((p) => p.includes(1));
   assert.deepEqual(await shown(), with1);
-  assert.equal(await visible("#hold"), true);
-  const v1 = with1.filter((i) => D.files[i].v).length;
-  assert.equal(await text("holdText"), `${with1.length - v1} photos` + (v1 ? ` · ${v1} video${v1 > 1 ? "s" : ""}` : ""));
-  assert.match(await text("holdText"), /^\d+ photos/);
-  assert.equal(await text("holdHint"), "tap another face to narrow");
-  assert.equal(await text("slug"), `example · ${with1.length} photos`);
-  assert.equal(await text("peopleLabel"), "10 people");
+  assert.equal(await visible("#pair"), true);
+  assert.equal(await text("peopleLabel"), `${with1.length} photos`);
+  assert.equal(await text("stats"), "10 people · 60 photos", "the header keeps the whole collection");
+  await noHints();
   assert.equal(await b.evalJs(`document.querySelector('#list .face[data-pid="1"]').getAttribute('aria-pressed')`), "true");
   assert.equal(await b.evalJs(`document.querySelector('#list .face[data-pid="1"]').classList.contains('held')`), true);
   // every count is the count if tapped
@@ -71,58 +72,77 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal(await count(12), "0");
   assert.equal(await b.evalJs(`document.querySelector('.face[data-pid="12"]').classList.contains('dim')`), true);
   for (const p of D.people) assert.equal(await count(p.id), String(filesWith((q) => q.includes(1) && q.includes(p.id)).length), `count beside ${p.id}`);
-  assert.equal(await b.evalJs(`document.querySelector('#pair .face img').getBoundingClientRect().width`), 48);
+  assert.equal(await b.evalJs(`document.querySelector('#pair .face img').getBoundingClientRect().width`), 36);
 
-  // two held: together
+  // two held: together, the default
   await face(2);
   assert.equal(await hash(), "#p=1.2");
-  assert.equal((await shown()).length, 9);
   assert.deepEqual(await shown(), filesWith((p) => p.includes(1) && p.includes(2)));
-  assert.equal(await text("holdText"), "together · 9 photos");
-  const any12 = filesWith((p) => p.includes(1) || p.includes(2));
-  assert.equal(await text("holdHint"), `tap the pair to separate → any · ${any12.length}`);
+  assert.equal(await text("peopleLabel"), "9 photos");
+  await noHints();
   assert.equal(await b.evalJs(`document.getElementById('pair').classList.contains('tight')`), true);
   assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 2);
+  assert.equal(await b.evalJs(`document.getElementById('pair').getAttribute('aria-label')`), "Held: Person 1, Person 2");
 
-  // tap the pair: any
+  // tap the pair: any, unannounced; only the count says so
   await tap("#pair");
-  assert.match(await text("holdText"), /^any · /);
-  assert.equal(await text("holdText"), `any · ${any12.length} photos`);
-  assert.equal(await text("holdHint"), "tap the pair to overlap → together · 9");
-  assert.ok((await hash()).endsWith("&any"));
+  const any12 = filesWith((p) => p.includes(1) || p.includes(2));
+  assert.equal(await text("peopleLabel"), `${any12.length} photos`);
+  await noHints();
   assert.equal(await hash(), "#p=1.2&any");
   assert.deepEqual(await shown(), any12);
   assert.equal(await b.evalJs(`document.getElementById('pair').classList.contains('apart')`), true);
   for (const p of D.people) assert.equal(await count(p.id), String(filesWith((q) => q.includes(1) || q.includes(2) || q.includes(p.id)).length), `any count beside ${p.id}`);
 
-  // back to together, then a face with no photo together with 1 and 2
+  // back to together, then a face with no photo together with 1 and 2: a quiet empty state
   await tap("#pair");
-  assert.equal(await text("holdText"), "together · 9 photos");
+  assert.equal(await text("peopleLabel"), "9 photos");
   assert.equal(await count(12), "0");
   await face(12);
   assert.equal(await hash(), "#p=1.2.12");
   assert.deepEqual(await shown(), []);
   assert.equal(await visible("#empty"), true);
-  const anyAll = filesWith((p) => p.includes(1) || p.includes(2) || p.includes(12));
-  assert.equal(await b.evalJs(`document.querySelector('#empty button').textContent`), `any · ${anyAll.length}`);
-  assert.match(await b.evalJs(`document.querySelector('#empty button').textContent`), /^any · \d+$/);
+  assert.equal(await b.evalJs(`document.querySelector('#empty p').textContent`), "No photos of them together");
+  assert.equal(await b.evalJs(`document.querySelector('#empty button').textContent`), "clear");
+  assert.equal(await text("peopleLabel"), "0 photos");
+  await noHints();
   await tap("#empty button");
-  assert.equal(await hash(), "#p=1.2.12&any");
-  assert.deepEqual(await shown(), anyAll);
+  assert.equal(await hash(), "");
+  assert.equal((await shown()).length, 60);
   assert.equal(await visible("#empty"), false);
 
   // a held face in the list lets go
+  await face(1); await face(2);
   await face(1);
-  assert.equal(await hash(), "#p=2.12&any");
+  assert.equal(await hash(), "#p=2");
   assert.equal(await b.evalJs(`document.querySelector('#list .face[data-pid="1"]').getAttribute('aria-pressed')`), "false");
 
-  // × clears everything
+  // × clears everything; the pill is the people again
   await tap("#clear");
   assert.equal(await hash(), "");
   assert.equal((await shown()).length, 60);
-  assert.equal(await visible("#hold"), false);
-  assert.equal(await text("slug"), "example · 60");
+  assert.equal(await visible("#pair"), false);
+  assert.equal(await visible("#clear"), false);
+  assert.equal(await text("peopleLabel"), "10 people");
   for (const p of D.people) assert.equal(await count(p.id), String(p.n));
+});
+
+test("collapsed with someone held: one pill bottom-left with the faces, the count and ×", async () => {
+  for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
+    await b.load(w, h, m, "/example/#p=1.2", READY);
+    assert.equal(await visible("#list"), false);
+    const r = await b.evalJs(`(() => { const g = (id) => document.getElementById(id).getBoundingClientRect(); const bar = g('bar');
+      const inside = (e) => e.left >= bar.left - 0.5 && e.right <= bar.right + 0.5 && e.top >= bar.top - 0.5 && e.bottom <= bar.bottom + 0.5;
+      return { left: bar.left, bottom: bar.bottom, height: bar.height, pair: inside(g('pair')), people: inside(g('people')), clear: inside(g('clear')),
+        clearW: g('clear').width, faces: document.querySelectorAll('#bar #pair .face').length }; })()`);
+    assert.ok(r.left <= 24 && h - r.bottom <= 24, `${w}: pill at ${r.left},${r.bottom}`);
+    assert.ok(r.height >= 50 && r.height <= 54, `${w}: ${r.height}px tall`);
+    assert.deepEqual([r.pair, r.people, r.clear, r.faces], [true, true, true, 2], `${w}: all inside the one pill`);
+    assert.equal(r.clearW, 44);
+    assert.equal(await text("peopleLabel"), "9 photos");
+    assert.equal(await b.evalJs(`document.querySelectorAll('.panel .hold, #hold, .hint').length`), 0, "no separate hold card");
+    await noHints();
+  }
 });
 
 test("the URL: a shared hold loads; unknown and malformed ids are dropped", async () => {
@@ -133,34 +153,28 @@ test("the URL: a shared hold loads; unknown and malformed ids are dropped", asyn
   await b.load(390, 844, true, "/example/#p=1.2&any", READY);
   assert.deepEqual(await b.evalJs(`armful.state.picked`), [1, 2]);
   assert.equal(await b.evalJs(`armful.state.any`), true);
-  assert.equal(await text("holdText"), `any · ${filesWith((p) => p.includes(1) || p.includes(2)).length} photos`);
+  assert.equal(await text("peopleLabel"), `${filesWith((p) => p.includes(1) || p.includes(2)).length} photos`);
   for (const h of ["#p=", "#p=999", "#zzz", "#p=..&&any"]) {
     await b.load(390, 844, true, "/example/" + h, READY);
     assert.deepEqual(await b.evalJs(`armful.state.picked`), [], h);
     assert.equal((await shown()).length, 60, h);
-    assert.equal(await visible("#hold"), false, h);
+    assert.equal(await visible("#pair"), false, h);
   }
 });
 
-test("beyond five held: four faces and +N", async () => {
+test("beyond four held: four faces and +N, still one pill on screen", async () => {
   await b.load(390, 844, true, "/example/", READY);
-  for (const pid of [1, 2, 3, 4, 5]) await face(pid);
-  assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 5);
+  for (const pid of [1, 2, 3, 4]) await face(pid);
+  assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 4);
   assert.equal(await b.evalJs(`document.querySelector('#pair .more')`), null);
-  await face(6);
+  await face(5); await face(6);
   assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 4);
   assert.equal(await b.evalJs(`document.querySelector('#pair .more').textContent`), "+2");
+  assert.ok(await b.evalJs(`document.getElementById('bar').getBoundingClientRect().right <= innerWidth`), "the pill fits the phone");
   assert.equal(await hash(), "#p=1.2.3.4.5.6");
 });
 
-test("desktop: the hold sits in the panel above the pill", async () => {
-  await b.load(1440, 900, false, "/example/#p=1.2", READY);
-  const r = await b.evalJs(`[document.getElementById('hold'), document.getElementById('people')].map((e) => e.getBoundingClientRect().top)`);
-  assert.ok(r[0] < r[1], "hold above the pill");
-  assert.equal(await text("holdText"), "together · 9 photos");
-});
-
-test("motion: a tapped face flies to the hold on an arc; reduced motion skips it", async () => {
+test("motion: a tapped face flies to the pill on an arc; reduced motion skips it", async () => {
   await b.load(390, 844, true, "/example/", READY);
   await face(3);
   assert.equal(await b.evalJs(`document.querySelectorAll('.arc').length`), 1, "the arc runs");

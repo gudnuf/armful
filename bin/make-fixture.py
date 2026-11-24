@@ -17,6 +17,9 @@ Shape (the page tests rely on it):
   no t (so the file order is also the build's default order: by t, untimed last);
   nf (faces detected) >= people on the file: 0 on the 6 files with nobody
   (EMPTY), 8+ on the group shots (GROUP), otherwise 1-6.
+Then one malformed entry, appended LAST so no index above shifts: file "60",
+a video with w: 0, h: 0 and nobody on it, no t and no SVG. The page must drop
+it (and warn) and show the 60 good files; data.json holds 61 entries.
 """
 import json
 import os
@@ -101,6 +104,8 @@ def main(out_dir):
         p["rep"] = dict(f=f, box=[0, 0, min(w, h)], sz=400, c=1)
         people.append(p)
     people.sort(key=lambda q: (-q["n"], q["id"]))
+    good = len(files)
+    files.append(dict(i=str(N_FILES), w=0, h=0, p=[], v=1, nf=0))  # the malformed entry (see above)
 
     data = dict(
         built="2026-01-01",
@@ -111,7 +116,7 @@ def main(out_dir):
     )
     fx = os.path.join(out_dir, "fx")
     os.makedirs(fx, exist_ok=True)
-    for i, rec in enumerate(files):
+    for i, rec in enumerate(files[:good]):
         with open(os.path.join(fx, f"p{i}.svg"), "w") as fh:
             fh.write(photo_svg(i, rec["w"], rec["h"]))
     for pid in range(1, 13):

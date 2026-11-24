@@ -1,5 +1,6 @@
-// The floating panel (desktop, top-left) and the phone rail (a pill bottom-left that opens
-// upward): collapsed on arrival, faces load only when the list opens, Esc / a tap outside fold it.
+// The header (wordmark + numbers) and the people: one compact pill bottom-left that opens a
+// narrow, barely veiled rail of faces up the left edge. Collapsed on arrival, faces load only when
+// the rail opens; the wall keeps scrolling and taking taps beside it; the pill or Esc folds it.
 // Run: node --test test/panel.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -35,22 +36,35 @@ before(async () => {
 });
 after(async () => { await b?.close(); await srv?.close(); });
 
-test("phone: a pill bottom-left, collapsed; the rail opens upward and the pill stays put", async () => {
+const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
+
+test("phone: a header, a compact pill bottom-left; the rail is a narrow column up the left edge", async () => {
   await b.load(390, 844, true, "/example/", READY);
-  assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('panel')).position`), "fixed");
+  // the header: the wordmark linking home, the numbers beside it; its height is reserved
+  const head = await rect(".masthead");
+  assert.equal(head.top, 0);
+  assert.equal(head.height, 48);
+  const mark = await rect(".masthead .mark svg");
+  assert.ok(Math.abs(mark.width - 72) <= 1 && mark.left <= 24, `wordmark ${JSON.stringify(mark)}`);
+  assert.equal(await b.evalJs(`document.querySelector('.masthead .mark').getAttribute('href')`), "/");
+  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "10 people · 60 photos");
+  assert.ok(Math.abs((await rect("#stats")).top + (await rect("#stats")).height / 2 - (mark.top + mark.height / 2)) <= 3, "one line");
+  assert.equal(await b.evalJs(`document.querySelector('#panel .mark, #slug')`), null, "no wordmark or slug in the panel");
+  assert.equal((await rect("#wall")).top, head.bottom, "the wall starts under the header");
+
+  // the pill: bottom-left, within 24px of the corner, ~52px tall, as wide as its content
   assert.equal(await visible("#list"), false);
-  assert.equal(await visible("#people"), true);
   assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-expanded')`), "false");
-  const panel = await rect("#panel");
-  assert.ok(844 - panel.bottom <= 40 && panel.bottom <= 844, `panel bottom at ${panel.bottom}`);
-  assert.ok(Math.abs(panel.left - 14) <= 1, `panel left at ${panel.left}`);
+  const bar = await rect("#bar");
+  assert.ok(bar.left <= 24 && 844 - bar.bottom <= 24 && bar.bottom <= 844, `pill at ${JSON.stringify(bar)}`);
+  assert.ok(bar.height >= 50 && bar.height <= 54, `pill is ${bar.height}px tall`);
+  assert.ok(bar.width < 260, `pill is ${bar.width}px wide`);
   const pill = await rect("#people");
-  assert.ok(pill.height >= 44, `pill is ${pill.height}px tall`);
-  assert.ok(pill.bottom <= 844 && pill.left >= 14, "the pill is on screen");
-  // words: the collection label, the people count, +N more; no names
+  assert.ok(pill.height >= 44, `pill button is ${pill.height}px tall`);
   assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "10 people");
   assert.equal(await b.evalJs(`document.getElementById('more').textContent.trim()`), "+2 more");
-  assert.equal(await b.evalJs(`document.getElementById('slug').textContent`), "example · 60");
+  assert.equal(await visible("#pair"), false);
+  assert.equal(await visible("#clear"), false);
   // the stack's three faces load with the page; the list's only when it opens
   assert.ok(await b.until(`[...document.querySelectorAll('#people .stack img')].length === 3 && [...document.querySelectorAll('#people .stack img')].every((i) => i.complete && i.naturalWidth > 0)`), "stack faces loaded");
   assert.equal(await b.evalJs(`[...document.querySelectorAll('#list img')].filter((i) => i.getAttribute('src')).length`), 0);
@@ -58,16 +72,23 @@ test("phone: a pill bottom-left, collapsed; the rail opens upward and the pill s
   await tap("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`), "list opens");
   assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-expanded')`), "true");
-  assert.equal(await b.evalJs(`document.body.classList.contains('panelOpen')`), true);
   await sleep(500); // past any motion
   const list = await rect("#list");
-  assert.ok(list.bottom <= (await rect("#people")).top + 1, "the list sits above the pill");
+  assert.ok(list.bottom <= (await rect("#bar")).top + 1, "the rail sits above the pill");
+  assert.ok(list.left <= 16, `the rail hugs the left edge (${list.left})`);
+  assert.ok(list.width <= 110, `the rail is narrow: ${list.width}px`);
   assert.ok(same(pill, await rect("#people")), `pill moved: ${JSON.stringify(pill)} -> ${JSON.stringify(await rect("#people"))}`);
   assert.ok(await b.until(`[...document.querySelectorAll('#listMain img')].slice(0, 3).every((i) => i.getAttribute('src'))`), "list faces load once open");
+  // barely a veil: nothing dark or opaque behind the column, and none over the rest of the wall
+  const bg = await b.evalJs(`getComputedStyle(document.getElementById('list')).backgroundImage`);
+  assert.match(bg, /gradient/);
+  for (const a of [...bg.matchAll(/rgba\([^)]*,\s*([\d.]+)\)/g)].map((m) => +m[1])) assert.ok(a <= 0.6, `veil alpha ${a}`);
+  assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('panel')).backgroundColor`), "rgba(0, 0, 0, 0)");
+  assert.doesNotMatch(await b.evalJs(`document.getElementById('panel').innerText`), NO_HINTS);
 
   const rows = await b.evalJs(`[...document.querySelectorAll('#listMain li')].map((li) => ({
     pid: +li.querySelector('.face').dataset.pid, count: li.querySelector('.count').textContent, label: li.querySelector('.face').getAttribute('aria-label'),
-    s: li.querySelector('.face img').getBoundingClientRect().width }))`);
+    s: li.querySelector('.face img').getBoundingClientRect().width, h: li.querySelector('.face').getBoundingClientRect().height }))`);
   const people = await b.evalJs(`armful.D.people`);
   assert.equal(rows.length, 10);
   assert.deepEqual(rows.map((r) => r.pid).sort((x, y) => x - y), people.filter((p) => !p.x).map((p) => p.id).sort((x, y) => x - y));
@@ -76,14 +97,16 @@ test("phone: a pill bottom-left, collapsed; the rail opens upward and the pill s
     assert.equal(r.count, String(p.n), `person ${r.pid}`);
     assert.equal(r.label, `Person ${r.pid}, ${p.n} photos`);
     assert.equal(r.s, 44);
+    assert.ok(r.h >= 44, "44px tap target");
   }
 
   await tap("#more");
   assert.ok(await b.until(`document.getElementById('listMore').getClientRects().length > 0`), "+2 more opens");
   assert.equal(await b.evalJs(`document.querySelectorAll('#listMore li').length`), 2);
   assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('list')).overflowY`), "auto");
-  assert.equal(await b.evalJs(`(() => { const l = document.getElementById('list'); return l.scrollHeight >= l.clientHeight; })()`), true);
-  assert.ok((await rect("#list")).height <= 844 * 0.6 + 1, "the rail is capped at 60vh");
+  const tall = await rect("#list");
+  assert.ok(tall.top >= 0 && tall.bottom <= (await rect("#bar")).top + 1, `the rail fits between the top and the pill: ${JSON.stringify(tall)}`);
+  assert.ok(tall.width <= 110, `still narrow: ${tall.width}px`);
   await sleep(500);
   assert.ok(same(pill, await rect("#people")), "pill still in place after +more");
 
@@ -93,39 +116,51 @@ test("phone: a pill bottom-left, collapsed; the rail opens upward and the pill s
   assert.ok(same(pill, await rect("#people")), "pill still in place after closing");
 });
 
-test("phone: a tap outside folds the rail without opening the photo", async () => {
+test("phone: the rail stays open while the wall scrolls and opens photos; only the chevron or Esc closes it", async () => {
   await b.load(390, 844, true, "/example/", READY);
   await tap("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`));
-  await b.tap(300, 120); // a tile, top-right, clear of the rail
-  assert.ok(await b.until(`document.getElementById('list').getClientRects().length === 0`), "outside tap folds it");
-  assert.equal(await b.evalJs(`document.getElementById('lb').hidden`), true);
-  // tapping the pill again opens, and again folds
+  await b.evalJs(`scrollTo(0, 400)`);
+  await sleep(100);
+  assert.equal(await visible("#list"), true, "scrolling keeps it open");
+  // a tile clear of the rail: the previewer opens, the rail stays
+  const n = await b.evalJs(`(() => { const x = 300; for (let y = 200; y < 700; y += 40) { const t = document.elementFromPoint(x, y)?.closest('.tile'); if (t) return [x, y]; } })()`);
+  await b.tap(n[0], n[1]);
+  assert.ok(await b.until(`!document.getElementById('lb').hidden`, 2000), "the tile opens the previewer");
+  assert.equal(await b.evalJs(`document.getElementById('list').hidden`), false, "the rail stays open under it");
+  await b.key("Escape", 27); // closes the previewer only
+  assert.ok(await b.until(`document.getElementById('lb').hidden`, 2000));
+  assert.equal(await visible("#list"), true, "Esc in the previewer leaves the rail open");
+  // the chevron (the pill) folds it, and opens it again
+  await tap("#people");
+  assert.ok(await b.until(`document.getElementById('list').getClientRects().length === 0`), "the pill folds it");
   await tap("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`));
-  await tap("#people");
-  assert.ok(await b.until(`document.getElementById('list').getClientRects().length === 0`));
+  await b.key("Escape", 27);
+  assert.ok(await b.until(`document.getElementById('list').getClientRects().length === 0`), "Esc folds it");
 });
 
-test("desktop: the panel floats top-left over the wall, the list opens below the pill", async () => {
+test("desktop: header top-left, the pill bottom-left, the rail a narrow column above it", async () => {
   await b.load(1440, 900, false, "/example/", READY);
-  const panel = await rect("#panel");
-  assert.ok(Math.abs(panel.left - 18) <= 1 && Math.abs(panel.top - 18) <= 1, `panel at ${panel.left},${panel.top}`);
-  assert.ok(Math.abs(panel.width - 236) <= 1, `panel is ${panel.width} wide`);
+  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "10 people · 60 photos");
+  assert.ok((await rect(".masthead .mark")).left <= 24);
+  const bar = await rect("#bar");
+  assert.ok(bar.left <= 24 && 900 - bar.bottom <= 24, `pill at ${JSON.stringify(bar)}`);
   assert.equal(await visible("#list"), false);
-  assert.equal(await visible(".panel .mark"), true);
   const pill = await rect("#people");
   await click("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`), "click opens");
   const list = await rect("#list");
-  assert.ok(list.top >= pill.bottom - 1, "the list opens below the pill");
+  assert.ok(list.bottom <= bar.top + 1, "the rail sits above the pill");
+  assert.ok(list.width <= 110, `narrow: ${list.width}`);
   assert.ok(same(pill, await rect("#people")), "the pill keeps its place");
   assert.equal(await b.evalJs(`document.querySelector('#listMain .face img').getBoundingClientRect().width`), 36);
-  const over = await b.evalJs(`(() => { const p = document.getElementById('panel').getBoundingClientRect();
-    return [...document.querySelectorAll('#wall .tile')].some((t) => { const r = t.getBoundingClientRect();
-      return r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top; }); })()`);
-  assert.equal(over, true, "the wall runs under the panel");
-  assert.ok(list.bottom <= 900, "the list fits the screen");
+  assert.ok(list.top >= 0 && list.bottom <= 900, "the rail fits the screen");
+  // a click on the wall opens the photo and leaves the rail open
+  await b.click(900, 500);
+  assert.ok(await b.until(`!document.getElementById('lb').hidden`, 2000));
+  assert.equal(await b.evalJs(`document.getElementById('list').hidden`), false);
+  await b.key("Escape", 27);
   await click("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length === 0`), "click again folds");
 });

@@ -248,6 +248,8 @@ test("a data.json of the wrong shape shows the error state and mounts nothing", 
     { files: [{ i: 7, w: 10, h: 10, p: [] }] },
     { files: "nope" },
     { files: [{ i: "a", w: 10, h: 10, p: [] }], thumbs: { wall: 5 } },
+    { files: [{ i: "a", w: 10, h: 10, p: [] }], people: "nope" },
+    { files: [null, { i: "b", w: 0, h: 0, p: [], v: 1 }] }, // no usable file left
   ];
   for (const body of bad) {
     const off = b.on("Fetch.requestPaused", (p) => b.cdp("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200,
@@ -260,6 +262,66 @@ test("a data.json of the wrong shape shows the error state and mounts nothing", 
       assert.equal(await b.evalJs(`armful.D`), undefined, "data not published");
     } finally { await b.cdp("Fetch.disable"); off(); }
   }
+});
+
+// the page's own console.warn lines ("armful: …") while `go` loads it
+async function warnsOf(go) {
+  const warns = [];
+  const off = b.on("Runtime.consoleAPICalled", (p) => {
+    const line = p.args.map((a) => a.value).join(" ");
+    if (p.type === "warning" && line.startsWith("armful:")) warns.push(line);
+  });
+  try { await go(); await sleep(200); } finally { off(); }
+  return warns;
+}
+
+test("the fixture's malformed last entry (w: 0, h: 0) is dropped: 60 tiles, no error state, one warning", async () => {
+  const data = JSON.parse(readFileSync(join(FIX, "data.json"), "utf8"));
+  assert.equal(data.files.length, 61);
+  assert.equal(data.files[60].w, 0);
+  const warns = await warnsOf(() => b.load(390, 844, true, url(srv), READY));
+  assert.equal(await b.evalJs(`document.querySelectorAll('#wall .tile').length`), 60);
+  assert.equal(await b.evalJs(`armful.D.files.length`), 60);
+  assert.equal(await b.evalJs(`document.getElementById('loading').classList.contains('failed')`), false);
+  assert.ok(!(await b.evalJs(`document.getElementById('loading').innerText`)).includes("didn’t load"));
+  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "10 people · 60 photos");
+  assert.deepEqual(warns, ["armful: skipped 1 malformed entries"]);
+});
+
+test("malformed files anywhere and malformed people are dropped; indexes follow the kept files", async () => {
+  const data = JSON.parse(readFileSync(join(FIX, "data.json"), "utf8"));
+  const good = data.files.slice(0, 60);
+  // bad files at the front and in the middle shift every index; a bad person in the list
+  data.files = [{ i: "x0", w: 0, h: 0, p: [1], v: 1 }, ...good.slice(0, 30), { i: "", w: 10, h: 10, p: [] },
+    { i: "x2", w: 10, h: 10, p: "1" }, ...good.slice(30), { i: "x3", w: -4, h: 3, p: [] }, 7];
+  data.files.splice(45, 0, { i: "x4", w: 1, h: NaN, p: [5] });
+  for (const p of data.people) p.rep.f = data.files.indexOf(good[p.rep.f]); // reps index this list
+  data.people.find((p) => p.id === 5).rep.f = 45; // its rep points at a file that is dropped
+  data.people = data.people.flatMap((p) => p.id === 3 ? [p, { id: "3b" }, null] : [p]);
+  const body = JSON.stringify(data); // h: NaN arrives as null
+  const off = b.on("Fetch.requestPaused", (p) => b.cdp("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200,
+    responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from(body).toString("base64") }));
+  await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*data.json*" }] });
+  try {
+    const warns = await warnsOf(() => b.load(390, 844, true, url(srv) + "#p=1.2", `document.querySelectorAll('#wall .tile').length > 0 && document.getElementById('loading').hidden`));
+    assert.deepEqual(warns, ["armful: skipped 8 malformed entries"]);
+    assert.deepEqual(await b.evalJs(`armful.D.files.map((f) => f.i)`), good.map((f) => f.i));
+    assert.equal(await b.evalJs(`document.querySelectorAll('#wall .tile').length`), 60);
+    assert.deepEqual(await b.evalJs(`armful.D.people.map((p) => p.id)`), JSON.parse(readFileSync(join(FIX, "data.json"), "utf8")).people.map((p) => p.id));
+    // every kept rep still points at the same file; the one whose file was dropped has none
+    const fx = JSON.parse(readFileSync(join(FIX, "data.json"), "utf8"));
+    for (const p of fx.people) {
+      const rep = await b.evalJs(`armful.D.people.find((q) => q.id === ${p.id}).rep?.f ?? null`);
+      assert.equal(rep, p.id === 5 ? null : p.rep.f, `rep of ${p.id}`);
+    }
+    const want = {};
+    good.forEach((f, i) => f.p.forEach((pid) => (want[pid] ||= []).push(i)));
+    assert.deepEqual(await b.evalJs(`Object.fromEntries([...armful.tilesOf].map(([k, v]) => [k, v]))`), want);
+    // the hash loads against the kept files: 1 and 2 together are their 9 shared files
+    assert.equal(await b.evalJs(`armful.state.picked.join('.')`), "1.2");
+    assert.equal(await b.evalJs(`armful.tiles.filter((t) => !t.hidden).length`), 9);
+    assert.equal(await b.evalJs(`document.getElementById('loading').classList.contains('failed')`), false);
+  } finally { await b.cdp("Fetch.disable"); off(); }
 });
 
 test("after load: no loading state, footer reachable, the clicked file opens even after a filter", async () => {
@@ -311,9 +373,25 @@ test("reduced motion: setShown snaps, nothing animates", async () => {
   } finally { await light(); }
 });
 
+test("the header reserves its height: the wall does not move when the numbers arrive", async () => {
+  const held = [];
+  const off = b.on("Fetch.requestPaused", (p) => held.push(p.requestId));
+  await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*data.json*" }] });
+  try {
+    await b.load(390, 844, true, url(srv), `document.readyState === 'complete'`);
+    const before = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.getElementById('stats').textContent]`);
+    assert.equal(before[2], "");
+    for (const id of held.splice(0)) await b.cdp("Fetch.continueRequest", { requestId: id });
+    assert.ok(await b.until(READY));
+    const after = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.getElementById('stats').textContent]`);
+    assert.deepEqual(after.slice(0, 2), before.slice(0, 2));
+    assert.equal(after[2], "10 people · 60 photos");
+  } finally { await b.cdp("Fetch.disable"); off(); }
+});
+
 test("tilesOf maps each person to exactly their files", async () => {
   await b.load(390, 844, true, url(srv), READY);
-  const files = JSON.parse(readFileSync(join(FIX, "data.json"), "utf8")).files;
+  const files = JSON.parse(readFileSync(join(FIX, "data.json"), "utf8")).files.slice(0, 60); // the 61st is malformed
   const want = {};
   files.forEach((f, i) => f.p.forEach((pid) => (want[pid] ||= []).push(i)));
   assert.deepEqual(await b.evalJs(`Object.fromEntries([...armful.tilesOf].map(([k, v]) => [k, v]))`), want);
@@ -329,6 +407,7 @@ test("helpers honour data.json thumbs; head carries the Veil colours and the fav
   assert.equal(await b.evalJs(`document.querySelector('link[rel=icon]')?.getAttribute('href')`), "favicon.svg");
   assert.equal(await b.evalJs(`document.querySelector('footer').textContent.trim().replace(/\\s+/g, ' ')`), "Want your face removed? Write to photos@armful.photos");
   assert.equal(await b.evalJs(`document.querySelector('aside#panel.panel') !== null`), true);
+  assert.equal(await b.evalJs(`document.querySelector('header.masthead a.mark[href="/"] svg') !== null`), true);
 });
 
 test("nothing threw", () => assert.deepEqual(errors, []));

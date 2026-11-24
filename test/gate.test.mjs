@@ -13,7 +13,8 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { door, SCRIPT, SCRIPT_HASH } from "../functions/_door.js";
+import { door, SCRIPT, SCRIPT_HASH, CSP, FAVICON_SVG } from "../functions/_door.js";
+import { PAGE_CSP } from "../functions/_middleware.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const WRANGLER = "wrangler@4.167.0"; // pinned: same version every run, cached after the first
@@ -195,10 +196,67 @@ describe("door() markup, no server", () => {
     assert.match(html, /<p class="sr" id="wrong" role="alert">Wrong password\. Try again\.<\/p>/);
     assert.match(html, /<input type="password"[^>]*aria-describedby="wrong"/);
   });
+
+  test("the cover: name and dates as escaped text, og:title from the name; omitted when absent or unusable", async () => {
+    const FONTS = { display: "/static/fonts/bricolage-grotesque-700.0123456789.woff2", label: "/static/fonts/inter-600.0123456789.woff2",
+      text: "/static/fonts/inter-500.0123456789.woff2" };
+    const html = await door(401, false, { slug: SLUG, title: TITLE, name: "BNF YTT Spain", dates: "15 Aug – 4 Sep 2026", fonts: FONTS }).text();
+    assert.match(html, /<div class="cover"><h1 class="name">BNF YTT Spain<\/h1><p class="dates">15 Aug – 4 Sep 2026<\/p><\/div>/);
+    assert.match(html, /<meta property="og:title" content="BNF YTT Spain on armful">/);
+    for (const u of Object.values(FONTS)) {
+      assert.ok(html.includes(`<link rel="preload" href="${u}" as="font" type="font/woff2" crossorigin>`), u);
+      assert.ok(html.includes(`src:url(${u}) format("woff2")`), u);
+    }
+    const hostile = '<img src=x onerror="alert(1)">&';
+    const h = await door(401, false, { slug: SLUG, name: hostile, dates: hostile }).text();
+    const esc = hostile.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    assert.ok(h.includes(`<h1 class="name">${esc}</h1><p class="dates">${esc}</p>`));
+    assert.doesNotMatch(h, /<img src=x/);
+    // absent, too long, not text, control characters: no cover (and no fonts); dates alone never show
+    for (const o of [{}, { name: "x".repeat(61) }, { name: 42 }, { name: "a\nb" }, { dates: "1 May" }, { name: "  " }]) {
+      const d = await door(401, false, { slug: SLUG, fonts: { display: FONTS.display }, ...o }).text();
+      assert.doesNotMatch(d, /class="cover"|class="dates"/, JSON.stringify(o));
+      assert.doesNotMatch(d, /bricolage/, JSON.stringify(o));
+    }
+    // a too-long dates line is dropped, the name stays
+    const d = await door(401, false, { slug: SLUG, name: "Ok", dates: "x".repeat(41) }).text();
+    assert.match(d, /<div class="cover"><h1 class="name">Ok<\/h1><\/div>/);
+    // font URLs other than /static/fonts/<name>.<hash>.woff2 are never named
+    for (const bad of ["https://evil.example/f.woff2", "/static/fonts/x.woff2", "/x/fonts/a.0123456789.woff2", '/static/fonts/a.0123456789.woff2"><script>']) {
+      const t = await door(401, false, { slug: SLUG, name: "Ok", dates: "May", fonts: { display: bad, label: bad, text: bad } }).text();
+      assert.doesNotMatch(t, /rel="preload"|@font-face\{font-family:"(Bricolage Grotesque|Inter)"/, bad);
+    }
+  });
+
+  test("the door's tab icon is the heap symbol, inline (site/favicon.svg), allowed by the CSP", async () => {
+    const html = await door(401, false, { slug: SLUG }).text();
+    const m = html.match(/<link rel="icon" href="data:image\/svg\+xml,([^"]+)" type="image\/svg\+xml">/);
+    assert.ok(m, "an inline favicon");
+    assert.equal(decodeURIComponent(m[1]), readFileSync(join(ROOT, "site", "favicon.svg"), "utf8").trim());
+    assert.equal(FAVICON_SVG, readFileSync(join(ROOT, "site", "favicon.svg"), "utf8").trim());
+    assert.match(CSP, /img-src [^;]*data:/);
+    assert.match(CSP, /font-src 'self'/);
+  });
+
+  test("the field says what it wants: a 'password' placeholder beside a lock glyph, still autofocused", async () => {
+    for (const wrong of [false, true]) {
+      const html = await door(401, wrong, { slug: SLUG }).text();
+      const input = html.match(/<input type="password"[^>]*>/)[0];
+      assert.match(input, /\splaceholder="password"/);
+      assert.match(input, /\sautocomplete="current-password"/);
+      assert.match(input, /\sautofocus/);
+      // the lock: an aria-hidden inline svg, first in the pill, before the input
+      const field = html.slice(html.indexOf('<div class="field">'), html.indexOf("</div>", html.indexOf('<div class="field">')));
+      assert.match(field, /^<div class="field">\s*<svg class="lock" width="16" height="16"[^>]*aria-hidden="true">/);
+      assert.ok(field.indexOf('class="lock"') < field.indexOf("<input"));
+      assert.match(html, /::placeholder\{color:#[0-9A-F]{6};/i);
+      assert.match(html, /caret-color:#16231F/);
+    }
+  });
 });
 
 describe("with secrets set", () => {
-  before(() => start({ [key(SLUG)]: PASS, [key(OTHER)]: PASS, [key(WEAK)]: "x".repeat(15) }), { timeout: 180000 });
+  before(() => start({ [key(SLUG)]: PASS, [key(OTHER)]: PASS, [key(WEAK)]: "x".repeat(5) }), { timeout: 180000 });
   after(stop);
 
   test("home is not gated", T, async () => {
@@ -339,7 +397,7 @@ describe("with secrets set", () => {
 
     const data = await get(`/${SLUG}/data.json`, { Cookie: c });
     assert.equal(data.status, 200);
-    assert.equal(JSON.parse(await data.text()).files.length, 60);
+    assert.equal(JSON.parse(await data.text()).files.length, 61); // the fixture: 60 files + 1 malformed
     assert.equal(data.headers.get("cache-control"), "private, no-cache");
   });
 
@@ -397,8 +455,8 @@ describe("with secrets set", () => {
     assert.equal((await get(`/${OTHER}/data.json`, { Cookie: own })).status, 200);
   });
 
-  test("a secret shorter than 16 characters fails closed like a missing one", T, async () => {
-    for (const r of [await get(`/${WEAK}/`), await post(WEAK, { p: "x".repeat(15) })]) {
+  test("a secret shorter than 6 characters fails closed like a missing one", T, async () => {
+    for (const r of [await get(`/${WEAK}/`), await post(WEAK, { p: "x".repeat(5) })]) {
       assert.equal(r.status, 503);
       assert.match(r.headers.get("cache-control") || "", /no-store/);
       assert.equal(r.headers.get("set-cookie"), null);
@@ -447,6 +505,20 @@ describe("with secrets set", () => {
       assert.match(r.headers.get("vary") || "", /Cookie/i, path);
       assert.match(r.headers.get("cache-control") || "", /private/, path);
     }
+  });
+
+  test("the gated page carries the page CSP; data, assets, door and home do not", T, async () => {
+    const c = cookieOf(await gate(PASS));
+    const page = await get(`/${SLUG}/`, { Cookie: c });
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get("content-security-policy"), PAGE_CSP);
+    for (const d of ["default-src 'self'", "script-src 'self'", "frame-src https://drive.google.com",
+      "img-src 'self' https://drive.google.com https://*.googleusercontent.com data:", "base-uri 'none'", "frame-ancestors 'none'"]) {
+      assert.ok(PAGE_CSP.includes(d), d);
+    }
+    for (const path of [`/${SLUG}/data.json`, ASSET]) assert.equal((await get(path, { Cookie: c })).headers.get("content-security-policy"), null, path);
+    assert.match((await get(`/${SLUG}/`)).headers.get("content-security-policy") || "", /default-src 'none'/); // the door's own
+    assert.notEqual((await get("/")).headers.get("content-security-policy"), PAGE_CSP);
   });
 });
 

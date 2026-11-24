@@ -24,6 +24,10 @@ Steps:
 4. Give each file its capture time `t` (capture_time.py; omitted when unknown) and its face
    count `nf` (every face the scan detected, people or not), and order files by `t`, files
    without one last. Ordering files never renumbers people.
+5. Give each file its display width/height: the scan's, or, where the scan recorded none
+   (w or h <= 0), the file's own (media_size.py: Pillow with EXIF orientation, ffprobe with
+   the stream's rotation). A file whose size still cannot be told is left out of data.json
+   and listed in build_report.json ("dropped"): the page never gets a w or h <= 0.
 """
 import json
 import os
@@ -36,6 +40,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capture_time  # noqa: E402
 import collection  # noqa: E402
+import media_size  # noqa: E402
 
 
 def _need(name, what):
@@ -157,7 +162,7 @@ def main(argv=None):
     ap.add_argument(
         "--ffprobe",
         default="ffprobe",
-        help="ffprobe to read video capture times with (default: ffprobe on PATH; without it videos get no time)",
+        help="ffprobe to read video capture times and missing video sizes with (default: ffprobe on PATH; without it videos get no time)",
     )
     args = ap.parse_args(argv)
     thresh = args.merge
@@ -267,11 +272,30 @@ def main(argv=None):
     pinfo = {p["file_key"]: p for p in photos if p["drive_id"]}
     photo_keys = [p["file_key"] for p in photos if p["drive_id"] and p["kind"] == "photo"]
     video_keys = [p["file_key"] for p in photos if p["drive_id"] and p["kind"] == "video"]
-    keys = photo_keys + video_keys
-    # capture times; files ordered by time, those without one last in the order above
     ffprobe = capture_time.ffprobe_path(args.ffprobe)
     if video_keys and not ffprobe:
         print(f"no ffprobe ({args.ffprobe}): videos get no capture time", file=sys.stderr)
+    # display sizes: the scan's, else the file's own; a file without one is left out (before any
+    # index is taken, so person reps and per-file people only ever point at published files)
+    size, probed, dropped = {}, [], []
+    for k in photo_keys + video_keys:
+        p = pinfo[k]
+        w, h = media_size.dim(p["w"]), media_size.dim(p["h"])
+        if w <= 0 or h <= 0:
+            got = media_size.probe(os.path.join(DRIVE, p["rel"]), p["kind"], ffprobe)
+            entry = dict(drive_id=p["drive_id"], rel=p["rel"], kind=p["kind"], scan_w=p["w"], scan_h=p["h"])
+            if got is None:
+                dropped.append(entry)
+                continue
+            w, h = got
+            probed.append(dict(entry, w=w, h=h))
+        size[k] = (w, h)
+    for e in dropped:
+        print(f"no size for {e['kind']} {e['rel']} (scan: {e['scan_w']} x {e['scan_h']}): left out of data.json", file=sys.stderr)
+    photo_keys = [k for k in photo_keys if k in size]
+    video_keys = [k for k in video_keys if k in size]
+    keys = photo_keys + video_keys
+    # capture times; files ordered by time, those without one last in the order above
     when = {}
     for k in keys:
         path = os.path.join(DRIVE, pinfo[k]["rel"])
@@ -315,7 +339,7 @@ def main(argv=None):
                 continue
             x1, y1, x2, y2 = (float(r[k]) for k in ("x1", "y1", "x2", "y2"))
             side = min(x2 - x1, y2 - y1)
-            W = int(pinfo[r["file_key"]]["w"])
+            W = size[r["file_key"]][0]
             frac = min(side * 1.6 / W, 0.5)  # crop width as a share of the thumbnail
             need_r = REP_PX * W / (side * 1.6)  # small thumbnails load fast: prefer them
             fast = 1.0 if need_r <= 400 else 0.85 if need_r <= 800 else 0.5
@@ -338,7 +362,7 @@ def main(argv=None):
         if best is None:
             best = next(r for r in fs if r["kind"] == "photo")
         p = pinfo[best["file_key"]]
-        W, H = int(p["w"]), int(p["h"])
+        W, H = size[best["file_key"]]
         x1, y1, x2, y2 = (float(best[k]) for k in ("x1", "y1", "x2", "y2"))
         # square crop around the face, 1.6x the box, kept inside the image
         s = min(max(x2 - x1, y2 - y1) * 1.6, W, H)
@@ -379,7 +403,9 @@ def main(argv=None):
     files = []
     for k in keys:
         p = pinfo[k]
-        rec = dict(i=p["drive_id"], w=int(p["w"]), h=int(p["h"]), p=sorted(ppl_in[kidx[k]]))
+        w, h = size[k]
+        assert w > 0 and h > 0, k  # never publish a size the page cannot lay out
+        rec = dict(i=p["drive_id"], w=w, h=h, p=sorted(ppl_in[kidx[k]]))
         if p["kind"] == "video":
             rec["v"] = 1
         if k in when:
@@ -415,6 +441,8 @@ def main(argv=None):
                 videos=len(video_keys),
                 timed_photos=sum(k in when for k in photo_keys),
                 timed_videos=sum(k in when for k in video_keys),
+                sizes_probed=probed,  # the scan had no size; read from the file
+                dropped=dropped,  # no size anywhere: not on the page
             ),
             indent=1,
         ),
@@ -422,7 +450,9 @@ def main(argv=None):
     print(
         f"clusters {len(C)} -> people {len(groups)} ({len(merges)} merges at {thresh}); "
         f"on page {len(people)}, 3+ photos {sum(q['n'] >= 3 for q in people)}, main sky {sum('x' not in q for q in people)}; "
-        f"files {len(photo_keys)} photos + {len(video_keys)} videos ({len(when)} with a time); hidden {len(hidden)}; "
+        f"files {len(photo_keys)} photos + {len(video_keys)} videos ({len(when)} with a time"
+        f"{f', {len(probed)} sized from the file' if probed else ''}{f', {len(dropped)} left out: no size' if dropped else ''}); "
+        f"hidden {len(hidden)}; "
         f"wrote {data_f}"
     )
 

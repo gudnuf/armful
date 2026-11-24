@@ -7,6 +7,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { inflateSync } from "node:zlib";
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { launch } from "./cdp.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".woff2": "font/woff2", ".png": "image/png" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".woff2": "font/woff2", ".png": "image/png", ".svg": "image/svg+xml" };
 const DOOR = "DOOR_PHOTO_ID_0123456789";
 const KEY = "armful:recent";
 let WORK, srv, base, b;
@@ -159,6 +160,33 @@ test("light and dark: the titles and the label are legible on the ground", { tim
     assert.ok(c.name >= 7, `${mode}: title contrast ${c.name}`);
     assert.ok(c.lbl >= 4.5, `${mode}: label contrast ${c.lbl}`);
     if (mode === "dark") assert.notEqual(c.box, "rgb(242, 239, 232)", "dark: the placeholder is not a bright cream slab");
+  }
+  await scheme("light");
+});
+
+// one rendered pixel of a page, [r, g, b]: a 1x1 PNG (with no neighbours every scanline filter is the identity)
+async function pixel(x, y) {
+  const buf = Buffer.from((await b.cdp("Page.captureScreenshot", { format: "png", clip: { x, y, width: 1, height: 1, scale: 1 } })).data, "base64");
+  let o = 8, idat = [];
+  while (o < buf.length) {
+    const len = buf.readUInt32BE(o), type = buf.toString("latin1", o + 4, o + 8);
+    if (type === "IDAT") idat.push(buf.subarray(o + 8, o + 8 + len));
+    o += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  return [raw[1], raw[2], raw[3]];
+}
+
+test("the favicon follows the tab: ink on light, paper on dark (home, 404 and collection share it)", { timeout: 60000 }, async () => {
+  const href = await (async () => { await b.load(390, 844, true, "/"); return b.evalJs("document.querySelector('link[rel=icon]').getAttribute('href')"); })();
+  assert.match(href, /^\/static\/favicon\.[0-9a-f]{10}\.svg$/);
+  await b.load(390, 844, true, "/404.html");
+  assert.equal(await b.evalJs("document.querySelector('link[rel=icon]').getAttribute('href')"), href);
+  for (const [mode, rgb] of [["light", [0x16, 0x23, 0x1f]], ["dark", [0xf2, 0xef, 0xe8]]]) {
+    await scheme(mode);
+    await b.load(512, 512, false, href);
+    const px = await pixel(80, 150); // inside the symbol's left column
+    assert.ok(px.every((c, i) => Math.abs(c - rgb[i]) <= 3), `${mode}: ${px} should be ${rgb}`);
   }
   await scheme("light");
 });

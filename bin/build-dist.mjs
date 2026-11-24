@@ -12,12 +12,15 @@
 //   index.html, 404.html       the home page and the not-found page (home/), public
 //   robots.txt, sitemap.xml    generated here: allow everything, list only the home page
 //   apple-touch-icon.png       home/og/apple-touch-icon.png (iOS asks for this path)
+//   (a page's <link rel=preload> of fonts/<name>.woff2 is rewritten to the hashed name too)
 //   static/                    style.<h>.css (site tokens), home.<h>.css, fonts/<name>.<h>.woff2, fonts/OFL.txt,
+//                              favicon.<h>.svg (site/favicon.svg, the home and 404 icon),
 //                              og.<h>.png (home/og/og.png, the link-preview card; the home page's
 //                              og:image / twitter:image name it by absolute URL)
 //                              ("static" is a reserved first segment, so the gate passes it)
 //   <slug>/                    index.html, app.<h>.js, style.<h>.css, the named SVGs, fonts/ as above,
-//                              data.json (the collection build output), door.json (from collection.json)
+//                              data.json (the collection build output), door.json (from collection.json: title, door photo,
+//                              name, dates; plus the /static/fonts/ URLs the door's cover uses)
 //   _headers, _redirects       from site/, at the root only
 //
 // Fonts are exactly the url()s style.css names (each must be a real woff2); their
@@ -88,10 +91,10 @@ function collection(colDir) {
   try { cfg = JSON.parse(input(root, "collection.json").toString("utf8")); } catch (e) {
     fail(e instanceof BuildError ? e.message : `${join(colDir, "collection.json")}: ${e.message}`);
   }
-  const { slug, title, door_photo, door_position } = cfg;
+  const { slug, title, door_photo, door_position, name, dates } = cfg;
   if (typeof slug !== "string" || !/^[a-z0-9-]{6,}$/.test(slug) || RESERVED.has(slug))
     fail(`${colDir}/collection.json: slug must be lowercase [a-z0-9-], at least 6 characters, and not reserved: ${JSON.stringify(slug)}`);
-  for (const [k, v] of [["title", title], ["door_photo", door_photo], ["door_position", door_position]])
+  for (const [k, v] of [["title", title], ["door_photo", door_photo], ["door_position", door_position], ["name", name], ["dates", dates]])
     if (v !== undefined && (typeof v !== "string" || !v)) fail(`${colDir}/collection.json: ${k} must be a non-empty string when given`);
   if (!existsSync(join(root, "dist", "data.json")))
     fail(`${join(colDir, "dist", "data.json")} is missing: run python -I pipeline/gallery/build_site.py --collection ${relative(process.cwd(), colDir) || colDir} first`);
@@ -99,6 +102,12 @@ function collection(colDir) {
   const door = { title: title ?? slug };
   if (door_photo) door.photo = door_photo;
   if (door_position) door.position = door_position;
+  // the door's cover: the display name (60 characters at most) and a pre-formatted date range (40)
+  for (const [k, v, max] of [["name", name, 60], ["dates", dates, 40]]) {
+    if (v === undefined) continue;
+    if (v.trim().length > max || /[\u0000-\u001f\u007f]/.test(v)) fail(`${colDir}/collection.json: ${k} must be plain text of at most ${max} characters`);
+    door[k] = v.trim();
+  }
   return { slug, root, data, door };
 }
 
@@ -155,7 +164,8 @@ function styleWithFonts(siteRoot) {
     }
     return `url(fonts/${fonts.get(name)[0]})`;
   });
-  return { css: out, fonts: [...fonts.values()], licence: input(siteRoot, `fonts/${FONT_LICENCE}`) };
+  const fontMap = Object.fromEntries([...fonts].map(([name, [to]]) => [name, to])); // source name -> hashed name
+  return { css: out, fonts: [...fonts.values()], fontMap, licence: input(siteRoot, `fonts/${FONT_LICENCE}`) };
 }
 
 function homeCss(homeRoot) {
@@ -213,13 +223,18 @@ function main() {
   if (existsSync(out) && existsSync(join(out, ".git"))) fail(`--out holds a .git: ${o.out}`);
 
   // read and transform everything before anything is written
-  const { css: styleCss, fonts, licence } = styleWithFonts(siteRoot);
+  const { css: styleCss, fonts, fontMap, licence } = styleWithFonts(siteRoot);
+  // a page may preload the fonts the stylesheet names: <link rel=preload href="fonts/<name>.woff2">
+  const fontRefs = (prefix) => Object.fromEntries(Object.entries(fontMap).map(([n, to]) => [`${prefix}fonts/${n}`, `${prefix}fonts/${to}`]));
   const styleName = hashed("style.css", Buffer.from(styleCss));
   const hCss = homeCss(homeRoot);
   const homeName = hashed("home.css", Buffer.from(hCss));
   const mark = inlineMark(siteRoot);
   const og = png(homeRoot, "og.png", 1200, 630);
   const ogName = hashed("og.png", og);
+  const favicon = input(siteRoot, "favicon.svg");
+  if (/(href|src)\s*=|url\(|<script/i.test(favicon.toString("utf8"))) fail("site/favicon.svg: must not reference anything");
+  const faviconName = hashed("favicon.svg", favicon);
   const touch = png(homeRoot, "apple-touch-icon.png", 180, 180);
   const files = new Map(); // dist-relative path -> bytes
   const put = (p, buf) => { if (files.has(p)) fail(`emitted twice: ${p}`); files.set(p, Buffer.isBuffer(buf) ? buf : Buffer.from(buf)); };
@@ -232,10 +247,14 @@ function main() {
   put(`static/${homeName}`, hCss);
   putFonts("static");
   put(`static/${ogName}`, og);
+  put(`static/${faviconName}`, favicon);
   put("apple-touch-icon.png", touch);
   put("robots.txt", ROBOTS);
   put("sitemap.xml", SITEMAP);
-  const homeMap = { "/static/style.css": `/static/${styleName}`, "/static/home.css": `/static/${homeName}` };
+  // the door (functions/_door.js) loads its faces from the public /static/fonts/ (a collection's own fonts/ are gated)
+  const doorFonts = Object.fromEntries([["display", "bricolage-grotesque-700.woff2"], ["label", "inter-600.woff2"], ["text", "inter-500.woff2"]]
+    .map(([k, n]) => { if (!fontMap[n]) fail(`site/style.css does not name fonts/${n} (the door uses it)`); return [k, `/static/fonts/${fontMap[n]}`]; }));
+  const homeMap = { "/static/style.css": `/static/${styleName}`, "/static/home.css": `/static/${homeName}`, "/static/favicon.svg": `/static/${faviconName}`, ...fontRefs("/static/") };
   for (const page of ["index.html", "404.html"]) {
     let html = input(homeRoot, page).toString("utf8");
     if (!html.includes("<!-- mark -->")) fail(`home/${page} has no <!-- mark --> placeholder`);
@@ -252,7 +271,7 @@ function main() {
   const svgs = SVGS.filter((n) => { try { lstatSync(join(siteRoot, n)); return true; } catch { return false; } })
     .map((n) => [n, input(siteRoot, n)]);
   const siteHtml = input(siteRoot, "index.html").toString("utf8");
-  const colHtml = rewriteRefs(siteHtml, { "app.js": appName, "style.css": styleName },
+  const colHtml = rewriteRefs(siteHtml, { "app.js": appName, "style.css": styleName, ...fontRefs("") },
     new Set([...svgs.map(([n]) => n), "data.json", "/"]), "site/index.html");
   for (const [ref, name] of [["app.js", appName], ["style.css", styleName]])
     if (!colHtml.includes(`"${name}`)) fail(`site/index.html does not reference ${ref}`);
@@ -263,7 +282,7 @@ function main() {
     for (const [n, buf] of svgs) put(`${c.slug}/${n}`, buf);
     putFonts(c.slug);
     put(`${c.slug}/data.json`, c.data);
-    put(`${c.slug}/door.json`, JSON.stringify(c.door) + "\n");
+    put(`${c.slug}/door.json`, JSON.stringify({ ...c.door, fonts: doorFonts }) + "\n");
   }
   put("_headers", input(siteRoot, "_headers"));
   put("_redirects", input(siteRoot, "_redirects"));

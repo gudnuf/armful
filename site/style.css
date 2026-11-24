@@ -14,14 +14,26 @@
   src: url(fonts/inter-600.woff2) format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 
+/* metric-matched local fallbacks: until a webfont arrives the text is set in Arial scaled to the
+   webfont's widths and line metrics, so the swap moves nothing (no layout shift) */
+@font-face { font-family: "Bricolage Fallback"; font-style: normal; font-weight: 700;
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Helvetica Bold"), local("Helvetica-Bold");
+  size-adjust: 99.65%; ascent-override: 93.3%; descent-override: 27.1%; line-gap-override: 0%; }
+@font-face { font-family: "Inter Fallback"; font-style: normal; font-weight: 400 500;
+  src: local("Arial"), local("ArialMT"), local("Helvetica");
+  size-adjust: 107.2%; ascent-override: 90.4%; descent-override: 22.5%; line-gap-override: 0%; }
+@font-face { font-family: "Inter Fallback"; font-style: normal; font-weight: 600 700;
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Helvetica Bold"), local("Helvetica-Bold");
+  size-adjust: 100.8%; ascent-override: 96.1%; descent-override: 23.9%; line-gap-override: 0%; }
+
 :root {
   color-scheme: light dark;
   /* the five named colours never change; --ground / --text / --ring / --line / --dim follow the device */
   --ink: #16231F; --paper: #FBFAF7; --cream: #F2EFE8; --body: #4A5754; --stone: #6B7975;
   --ground: #FBFAF7; --text: #16231F; --dim: #4A5754; --ring: #16231F; --line: rgba(22, 35, 31, .12);
-  --veil: rgba(255, 255, 255, .75); --veil-blur: 20px;
-  --display: "Bricolage Grotesque", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --veil: rgba(255, 255, 255, .75); --veil-blur: 20px; --rail: rgba(251, 250, 247, .5);
+  --display: "Bricolage Grotesque", "Bricolage Fallback", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --sans: "Inter", "Inter Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* motion: --spring for anything that moves, --fade for opacity, --press for a tapped face (120ms) */
   --spring: 420ms cubic-bezier(.2, .8, .2, 1); /* older Safari: no linear(); the spring below where supported */
   --fade: 250ms cubic-bezier(.2, 0, 0, 1);
@@ -33,7 +45,7 @@
 @supports (transition-timing-function: linear(0, 1)) { :root { --spring: 420ms linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1); } }
 @media (prefers-color-scheme: dark) {
   :root { --ground: #0D0F0E; --text: #F2EFE8; --dim: rgba(242, 239, 232, .68); --ring: #FBFAF7;
-    --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); }
+    --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); --rail: rgba(13, 15, 14, .45); }
 }
 @media (min-width: 1000px) { :root { --face-s: 36px; } }
 
@@ -82,79 +94,81 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .icon:focus-visible, .primary:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 3px; }
 @media (hover: hover) { .primary:hover { opacity: .88; } }
 
-/* the people panel: on a phone a pill bottom-left in thumb reach that opens upward into a rail
-   (the pill never moves); from 1000px a panel floating top-left over the wall, the list opening
-   below. A white veil over the photos; the wall runs under it edge to edge. */
-.panel { position: fixed; z-index: 10; left: max(14px, var(--sl)); bottom: calc(28px + var(--sb));
-  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px;
-  max-width: calc(100vw - 28px - var(--sl) - var(--sr)); border-radius: 28px;
+/* the header: the wordmark top-left and the collection's numbers beside it. It scrolls away with
+   the page; its height is fixed so nothing below moves when the numbers arrive. */
+.masthead { display: flex; align-items: center; gap: 14px; height: calc(48px + var(--st)); padding: var(--st) 14px 0; }
+.mark { display: flex; align-items: center; min-height: 44px; color: var(--text); line-height: 0; border-radius: 4px; }
+.mark svg { width: 72px; height: auto; fill: currentColor; }
+.stats { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the people: one compact pill bottom-left (every width). Nobody held: three faces, the people,
+   a chevron. Someone held: their faces, the count, ×. The pill opens a narrow rail of faces up
+   the left edge, barely veiled; the wall stays visible beside it and keeps scrolling and taking
+   taps. The pill never moves. */
+.panel { position: fixed; z-index: 10; left: 0; bottom: 0; width: 0; height: 0; }
+.bar { position: fixed; left: max(14px, var(--sl)); bottom: max(14px, var(--sb)); display: flex; align-items: center;
+  gap: 2px; padding: 4px; max-width: calc(100vw - 28px - var(--sl) - var(--sr)); border-radius: 999px;
   background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur));
-  box-shadow: 0 6px 20px rgba(22, 35, 31, .16); }
-.panel .head { order: -2; display: none; flex-direction: column; gap: 5px; padding: 8px 8px 2px; }
-body.panelOpen .panel .head { display: flex; }
-.panel .list { order: -1; }
-.panel #people { order: 1; }
-.mark { display: block; width: max-content; color: var(--text); line-height: 0; border-radius: 4px; }
-.mark svg { height: 22px; width: auto; fill: currentColor; }
+  box-shadow: 0 4px 16px rgba(22, 35, 31, .16); }
 .pill { all: unset; box-sizing: border-box; touch-action: manipulation; -webkit-tap-highlight-color: transparent; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px 0 7px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px 0 4px; border-radius: 999px;
   font: 600 11px/16px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--text); white-space: nowrap;
-  transition: transform var(--press-t) ease-out, background var(--fade), color var(--fade); }
+  font-variant-numeric: tabular-nums; transition: transform var(--press-t) ease-out, background var(--fade), color var(--fade); }
 .pill:active { transform: scale(var(--press)); }
 .pill:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 2px; }
+.bar.held #people { padding-left: 6px; }
+.bar.held .stack { display: none; }
 .stack { display: flex; flex: none; }
 .stack img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; background: var(--cream); box-shadow: 0 0 0 2px var(--ground); }
 .stack img + img { margin-left: -10px; }
-.chev { display: grid; margin-left: auto; transition: transform var(--spring); }
+.chev { display: grid; transition: transform var(--spring); }
 .chev svg { width: 18px; height: 18px; }
-/* a phone's rail opens upward: the chevron points the way it will go */
+/* the rail opens upward: the chevron points the way it will go */
 #people .chev { transform: rotate(180deg); }
 #people[aria-expanded="true"] .chev { transform: none; }
-.list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; overscroll-behavior: contain;
-  padding: 4px 8px 4px 4px; scrollbar-width: thin; }
+/* the rail: as wide as a face and its count, from just above the pill up to the top safe area at
+   most; it scrolls inside itself */
+.list { position: fixed; left: max(8px, var(--sl)); bottom: calc(max(14px, var(--sb)) + 60px);
+  max-height: calc(100vh - max(14px, var(--sb)) - 68px - max(8px, var(--st)));
+  max-height: calc(100dvh - max(14px, var(--sb)) - 68px - max(8px, var(--st)));
+  display: flex; flex-direction: column; gap: 6px; width: max-content; padding: 6px;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; border-radius: 28px;
+  background: linear-gradient(90deg, var(--rail), transparent); }
+.list::-webkit-scrollbar { display: none; }
 .list ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.list li { display: flex; align-items: center; gap: 10px; }
-.list .more { align-self: flex-start; padding: 0 14px; color: var(--dim); }
+.list li { display: flex; align-items: center; gap: 6px; }
+.list .face img { box-shadow: 0 1px 4px rgba(13, 15, 14, .28); }
+.list .face.held img { box-shadow: 0 0 0 2.5px var(--ground), 0 0 0 5px var(--ring); }
+.list .more { align-self: flex-start; min-height: 32px; padding: 0 10px; background: var(--veil); color: var(--text);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .count { font: 600 13px/20px var(--sans); font-variant-numeric: tabular-nums; min-width: 28px; padding: 0 7px; border-radius: 999px;
   text-align: center; background: var(--text); color: var(--ground); transition: opacity var(--fade); }
 .face.dim + .count { opacity: .3; }
 .face img[style*="background-image"] { background-repeat: no-repeat; } /* the CSS crop of a rotated photo */
-/* the hold: the held faces (overlapping = together, apart = any), the sentence, a small line, × */
-.hold { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "pair text x" "pair hint x";
-  align-items: center; column-gap: 10px; row-gap: 2px; padding: 2px 0 2px 2px; max-width: 100%; }
-.pair { all: unset; box-sizing: border-box; grid-area: pair; display: flex; align-items: center; cursor: pointer; border-radius: 999px;
-  touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-.pair:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 3px; }
-.pair .face { --s: 48px; min-height: 48px; transition: margin var(--spring); }
-.pair.tight .face + .face { margin-left: -24px; }
-.pair.apart .face + .face { margin-left: 6px; }
+/* the held faces: overlapping = together, apart = any */
+.pair { all: unset; box-sizing: border-box; display: flex; align-items: center; min-height: 44px; padding-left: 0; cursor: pointer;
+  border-radius: 999px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.pair[hidden] { display: none; }
+.pair:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 2px; }
+.pair .face { --s: 36px; min-height: 36px; cursor: inherit; transition: margin var(--spring); }
+.pair .face.held img { box-shadow: 0 0 0 2px var(--ground); }
+.pair.tight .face + .face { margin-left: -14px; }
+.pair.apart .face + .face { margin-left: 4px; }
 .pair .more { margin-left: 6px; font: 600 13px/20px var(--sans); font-variant-numeric: tabular-nums; }
-#holdText { grid-area: text; align-self: end; color: var(--text); }
-.hint { grid-area: hint; align-self: start; font: 500 12px/16px var(--sans); color: var(--dim); }
-.x { all: unset; box-sizing: border-box; grid-area: x; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+.x { all: unset; box-sizing: border-box; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex: none;
   cursor: pointer; color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-.x svg { width: 26px; height: 26px; padding: 4px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); }
-.x:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
-/* a tapped face on its way into the hold */
+.x svg { width: 24px; height: 24px; padding: 3px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); }
+.x:focus-visible { outline: 2.5px solid var(--ring); outline-offset: -2px; }
+/* a tapped face on its way into the pill */
 .arc { position: fixed; z-index: 40; margin: 0; border-radius: 50%; object-fit: cover; pointer-events: none; transform-origin: 0 0;
   background-color: var(--cream); background-repeat: no-repeat; }
-#empty .primary { font-variant-numeric: tabular-nums; }
-@media (max-width: 999px) {
-  footer { padding-bottom: calc(96px + var(--sb)); } /* the last words clear the pill */
-}
+#empty p { color: var(--text); }
+#empty .pill { min-height: 36px; padding: 0 14px; color: var(--dim); box-shadow: inset 0 0 0 1px var(--line); }
 @media (min-width: 1000px) {
-  .panel { left: max(18px, var(--sl)); top: max(18px, var(--st)); bottom: auto; width: 236px; max-width: none;
-    align-items: stretch; gap: 12px; padding: 16px 16px 14px; border-radius: 18px; box-shadow: 0 6px 24px rgba(22, 35, 31, .14); }
-  .panel .head, body.panelOpen .panel .head { display: flex; padding: 0; }
-  .panel .head, .panel .list, .panel #people { order: 0; }
-  .panel #people { background: var(--ground); box-shadow: inset 0 0 0 1px var(--line); }
-  .panel #people[aria-expanded="true"] { background: var(--text); color: var(--ground); }
-  #people .chev { transform: none; }
-  #people[aria-expanded="true"] .chev { transform: rotate(180deg); }
-  .list { max-height: calc(100vh - 260px); margin: 0 -8px 0 -4px; }
-  .hold { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "pair x" "text text" "hint hint"; row-gap: 4px; padding: 0; }
-  .hold .x { width: 32px; height: 32px; align-self: start; }
-  #holdText { margin-top: 4px; }
+  .bar { left: max(18px, var(--sl)); bottom: max(18px, var(--sb)); }
+  .list { left: max(12px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 60px);
+    max-height: calc(100vh - max(18px, var(--sb)) - 72px); }
+  .masthead { padding: 0 18px; }
 }
 
 /* the wall: whole photos in justified rows, full-bleed, 2px gutters. app.js packs the rows
@@ -201,8 +215,11 @@ body.panelOpen .panel .head { display: flex; }
 @keyframes fadein { from { opacity: 0; } }
 
 footer a { color: inherit; text-underline-offset: 3px; }
-footer { margin: 44px auto 0; padding: 18px 16px calc(18px + var(--sb)); border-top: 1px solid var(--line);
+footer { margin: 44px auto 0; padding: 18px 16px calc(96px + var(--sb)); /* the last words clear the pill */ border-top: 1px solid var(--line);
   color: var(--dim); font-size: 13px; line-height: 20px; text-align: center; }
+/* the collection page's footer waits (inert) until the wall is drawn: out of layout until then, so the
+   wall arriving above it moves nothing */
+footer[inert] { display: none; }
 
 /* the previewer: one photo or video, large, over the page; always dark */
 body.lbOpen { overflow: hidden; }
@@ -222,8 +239,18 @@ body.lbOpen { overflow: hidden; }
   -webkit-user-drag: none; -webkit-touch-callout: default; }
 /* the small thumbnail stands in, at the photo's final size, until the large image has loaded */
 .lbStage img.soft { width: min(var(--mw), calc(var(--mh) * var(--ar))); height: auto; aspect-ratio: var(--ar); }
-.lbStage iframe { border: 0; background: #000; aspect-ratio: var(--ar);
-  width: min(var(--mw), calc((100dvh - 136px) * var(--ar))); max-height: calc(100dvh - 136px); }
+/* a video: the wall's thumbnail, dimmed, and the loading mark until Drive's player has loaded;
+   then the player fades in over them */
+.lbStage .vid { position: relative; overflow: hidden; background: #1A1F1D; aspect-ratio: var(--ar);
+  width: min(var(--mw), calc((100vh - 136px) * var(--ar))); width: min(var(--mw), calc((100dvh - 136px) * var(--ar)));
+  max-height: calc(100dvh - 136px); }
+.lbStage .vid .poster { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover;
+  filter: blur(6px) brightness(.62); transform: scale(1.06); }
+.vid .symbol { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; fill: var(--paper);
+  opacity: .9; transition: opacity var(--fade); }
+.vid iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; opacity: 0; transition: opacity var(--fade); }
+.vid.ready iframe { opacity: 1; }
+.vid.ready .symbol { opacity: 0; }
 /* chrome: ink discs, paper glyphs, 44px */
 .lb .icon { width: 44px; height: 44px; background: rgba(22, 35, 31, .72); color: var(--paper);
   -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -238,7 +265,7 @@ body.lbOpen { overflow: hidden; }
 .lbCount { margin: 0 auto 0 0; padding: 14px 4px; font-variant-numeric: tabular-nums; pointer-events: none;
   text-shadow: 0 1px 6px rgba(13, 15, 14, .6); }
 #lbDrive { position: absolute; right: 0; top: 54px; } /* wide screens: download sits under close, clear of the photo */
-/* the held faces and the word, small at the bottom centre */
+/* the held faces, small at the bottom centre */
 .lbHold { position: absolute; left: 50%; bottom: calc(max(18px, var(--sb)) + 4px); transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; pointer-events: none; }
 .lbHold[hidden] { display: none; }
@@ -246,8 +273,6 @@ body.lbOpen { overflow: hidden; }
 .lbHold .face.held img { box-shadow: 0 0 0 2px var(--ground), 0 0 0 3.5px var(--paper); }
 .lbHold .pair.tight .face + .face { margin-left: -14px; }
 .lbHold .pair.apart .face + .face { margin-left: 6px; }
-.lbHold .lbl { text-shadow: 0 1px 6px rgba(13, 15, 14, .6); }
-.lbHold .lbl:empty { display: none; }
 
 @media (max-width: 999px) {
   /* previewer: the photo edge to edge, arrows low where the thumb is */

@@ -14,8 +14,14 @@ test("make-fixture writes the synthetic collection", () => {
   rmSync(OUT, { recursive: true, force: true });
   execFileSync("python3", ["-I", join(ROOT, "bin", "make-fixture.py"), OUT], { stdio: "inherit" });
   const data = JSON.parse(readFileSync(join(OUT, "data.json"), "utf8"));
-  const { files, people, thumbs } = data;
+  const { people, thumbs } = data;
 
+  // 60 good files, then one malformed entry appended last (the page drops it, nothing shifts)
+  assert.equal(data.files.length, 61);
+  assert.deepEqual(data.files[60], { i: "60", w: 0, h: 0, p: [], v: 1, nf: 0 });
+  assert.ok(!existsSync(join(OUT, "fx", "p60.svg")));
+  const files = data.files.slice(0, 60);
+  for (const f of files) assert.ok(f.w > 0 && f.h > 0, `size of ${f.i}`);
   assert.equal(files.length, 60);
   assert.equal(people.length, 12);
   assert.deepEqual(people.map((p) => p.id).sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
@@ -44,6 +50,7 @@ test("make-fixture writes the synthetic collection", () => {
   const timed = files.filter((f) => "t" in f);
   assert.equal(timed.length, 58);
   assert.deepEqual(files.slice(58).map((f) => "t" in f), [false, false], "untimed files last");
+  assert.ok(!("t" in data.files[60]), "the malformed entry is untimed too");
   for (const f of timed) assert.ok(Number.isInteger(f.t), "t is whole unix seconds");
   for (let k = 1; k < 58; k++) assert.ok(files[k].t > files[k - 1].t, "t strictly ascending");
   // 4 days (UTC), each with a morning and an evening cluster

@@ -1,5 +1,6 @@
 // The previewer keeps the query: a tap on a tile opens it large, stepping through exactly what
-// the wall shows (files, in wall order), with the held faces and the mode word at the bottom.
+// the wall shows (files, in wall order), with the held faces (no words) at the bottom. A video
+// shows its wall thumbnail and the loading mark until Drive's player has loaded, then fades it in.
 // Plus the recent-armfuls writer (localStorage "armful:recent").
 // Run: node --test test/previewer.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
 import { test, before, after } from "node:test";
@@ -17,7 +18,7 @@ let srv, b, D;
 const errors = [];
 const js = (x) => JSON.stringify(x);
 const filesWith = (pred) => D.files.map((f, i) => [f, i]).filter(([f]) => pred(f.p)).map(([, i]) => i);
-const LB = `(() => { const lb = document.getElementById('lb'), st = document.getElementById('lbStage'), im = st.querySelector('img'), fr = st.querySelector('iframe');
+const LB = `(() => { const lb = document.getElementById('lb'), st = document.getElementById('lbStage'), im = st.querySelector(':scope > img'), fr = st.querySelector('iframe');
   return { open: !lb.hidden, count: document.getElementById('lbCount').textContent, drive: document.getElementById('lbDrive').href,
     src: im ? im.getAttribute('src') : fr ? fr.src : '', soft: im ? im.classList.contains('soft') : null, video: !!fr,
     focusIn: lb.contains(document.activeElement), focus: document.activeElement?.id || '' }; })()`;
@@ -61,12 +62,11 @@ test("desktop: opens in the held set, counts files, steps, traps focus, Esc / Ba
   assert.equal(a.focus, "lbClose");
   assert.equal(await b.evalJs(`document.getElementById('lbCount').className`), "lbCount lbl light");
 
-  // the held pair and the word, small at the bottom
+  // the held pair, small at the bottom, and no words
   assert.equal(await b.evalJs(`document.getElementById('lbHold').hidden`), false);
   assert.deepEqual(await b.evalJs(`[...document.querySelectorAll('#lbHold .face img')].map((i) => [i.getBoundingClientRect().width, i.getBoundingClientRect().height])`), [[36, 36], [36, 36]]);
   assert.deepEqual(await b.evalJs(`[...document.querySelectorAll('#lbHold .face')].map((f) => +f.dataset.pid)`), [1, 2]);
-  assert.equal(await b.evalJs(`document.querySelector('#lbHold .lbl').textContent`), "together");
-  assert.equal(await b.evalJs(`document.getElementById('lbHold').textContent.trim()`), "together", "no other words, no names");
+  assert.equal(await b.evalJs(`document.getElementById('lbHold').textContent.trim()`), "", "no words, no names");
 
   // controls: 44px
   for (const id of ["lbPrev", "lbNext", "lbClose", "lbDrive"])
@@ -124,7 +124,7 @@ test("the hold in the previewer: any, one held, nobody held", async () => {
   const any = filesWith((p) => p.includes(1) || p.includes(2));
   await b.evalJs(`document.querySelector('.tile:not([hidden])').click()`);
   assert.equal((await lb()).count, `1 / ${any.length}`);
-  assert.equal(await b.evalJs(`document.querySelector('#lbHold .lbl').textContent`), "any");
+  assert.equal(await b.evalJs(`document.getElementById('lbHold').textContent.trim()`), "");
   assert.equal(await b.evalJs(`document.querySelectorAll('#lbHold .face').length`), 2);
   await b.key("Escape", 27);
 
@@ -132,7 +132,7 @@ test("the hold in the previewer: any, one held, nobody held", async () => {
   await b.evalJs(`document.querySelector('.tile:not([hidden])').click()`);
   assert.equal((await lb()).count, `1 / ${filesWith((p) => p.includes(1)).length}`);
   assert.equal(await b.evalJs(`document.querySelectorAll('#lbHold .face').length`), 1);
-  assert.equal(await b.evalJs(`document.querySelector('#lbHold .lbl').textContent`), "");
+  assert.equal(await b.evalJs(`document.getElementById('lbHold').textContent.trim()`), "");
   await b.key("Escape", 27);
 
   await b.load(1280, 900, false, "/example/", READY);
@@ -184,7 +184,7 @@ test("phone: tap opens; swipes step and close; 44px controls; the counter is a l
   assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('lbCount')).color`), "rgb(242, 239, 232)");
   for (const id of ["lbPrev", "lbNext", "lbClose", "lbDrive"])
     assert.deepEqual(await b.evalJs(`(() => { const r = document.getElementById('${id}').getBoundingClientRect(); return [r.width, r.height]; })()`), [44, 44], id);
-  assert.equal(await b.evalJs(`document.querySelector('#lbHold .lbl').textContent`), "together");
+  assert.equal(await b.evalJs(`document.getElementById('lbHold').textContent.trim()`), "");
   // the hold sits clear of the arrows
   const ov = await b.evalJs(`(() => { const h = document.querySelector('#lbHold').getBoundingClientRect();
     return ['lbPrev', 'lbNext'].some((id) => { const r = document.getElementById(id).getBoundingClientRect(); return r.left < h.right && h.left < r.right && r.top < h.bottom && h.top < r.bottom; }); })()`);
@@ -200,6 +200,44 @@ test("phone: tap opens; swipes step and close; 44px controls; the counter is a l
   await swipe(200, 300, 205, 560); // down: close
   assert.ok(await b.until(`document.getElementById('lb').hidden`, 2000), "swipe down closes");
   assert.equal(await b.evalJs(`document.activeElement?.dataset?.n`), String(n));
+});
+
+test("video: the thumbnail and the loading mark until Drive's player loads, then it fades in", async () => {
+  const v = D.files.findIndex((f) => f.v);
+  assert.ok(v >= 0, "the fixture has a video");
+  const held = [];
+  const off = b.on("Fetch.requestPaused", (p) => held.push(p.requestId)); // Drive answers only when we say
+  await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*drive.google.com/file/*" }] });
+  try {
+    for (const [w, h, m] of [[390, 844, true], [1280, 900, false]]) {
+      held.length = 0;
+      await b.load(w, h, m, "/example/", READY);
+      await b.evalJs(`document.querySelector('.tile[data-n="${v}"]').click()`);
+      assert.ok(await b.until(`!!document.querySelector('#lbStage .vid iframe')`, 2000), "the player is on its way");
+      assert.ok(await b.until(`(() => { const i = document.querySelector('#lbStage .vid .poster'); return i.complete && i.naturalWidth > 0; })()`, 3000), "the poster shows");
+      const st = await b.evalJs(`(() => { const box = document.querySelector('#lbStage .vid'), r = box.getBoundingClientRect(), p = box.querySelector('.poster').getBoundingClientRect();
+        return { w: r.width, h: r.height, pw: p.width, ph: p.height, poster: box.querySelector('.poster').getAttribute('src'),
+          thumb: document.querySelector('.tile[data-n="${v}"] img').currentSrc, mark: !!box.querySelector('.symbol .top'),
+          op: getComputedStyle(box.querySelector('iframe')).opacity, filter: getComputedStyle(box.querySelector('.poster')).filter }; })()`);
+      assert.ok(st.w > 200 && st.h > 100, `${w}: the box has the video's size (${st.w}x${st.h})`);
+      assert.ok(st.pw >= st.w && st.ph >= st.h, `${w}: the poster fills it`);
+      assert.ok(st.poster === st.thumb || st.poster.endsWith(`p${v}.svg`), `${w}: the wall's thumbnail (${st.poster})`);
+      assert.equal(st.mark, true, "the loading mark");
+      assert.equal(st.op, "0", "the player waits unseen");
+      assert.match(st.filter, /blur|brightness/);
+      await sleep(600);
+      assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#lbStage .vid iframe')).opacity`), "0", "still unseen while Drive is slow");
+      // Drive answers: after the load and a short settle, the player fades in on the 250ms fade
+      assert.ok(await b.until(`true`) && held.length > 0, "Drive was asked");
+      for (const id of held.splice(0)) await b.cdp("Fetch.fulfillRequest", { requestId: id, responseCode: 200,
+        responseHeaders: [{ name: "content-type", value: "text/html" }], body: Buffer.from("<!doctype html><body style=background:#000></body>").toString("base64") }).catch(() => {});
+      assert.ok(await b.until(`document.querySelector('#lbStage .vid').classList.contains('ready')`, 3000), "ready after load");
+      assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#lbStage .vid iframe')).transitionDuration`), "0.25s");
+      assert.ok(await b.until(`getComputedStyle(document.querySelector('#lbStage .vid iframe')).opacity === '1'`, 2000), "faded in");
+      assert.ok(await b.until(`!document.querySelector('#lbStage .vid .symbol')`, 2000), "the mark goes");
+      await b.key("Escape", 27);
+    }
+  } finally { await b.cdp("Fetch.disable"); off(); }
 });
 
 // ---- recent armfuls: localStorage["armful:recent"] ----

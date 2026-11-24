@@ -40,7 +40,11 @@ follow the device's colour scheme.
 **Type.** Self-hosted woff2 only (OFL 1.1, `site/fonts/`): no request goes
 to a font host. Inter 400/500/600 for everything at 16/24. Bricolage
 Grotesque 700 only for the wordmark and the one title (32/40,
-letter-spacing -0.03em). Counts use tabular numerals.
+letter-spacing -0.03em) and the door's cover name. Counts use tabular numerals.
+Nothing moves while a page loads (test/cls.test.mjs holds every page under
+0.01 CLS, cold and warm): the faces the first screen needs are preloaded, and
+until they arrive the text is set in Arial scaled to their metrics
+(`size-adjust` / `ascent-override` fallbacks), so the swap moves nothing.
 
 **Motion.**
 
@@ -90,7 +94,9 @@ Faces are 44px (36px from 1000px wide); the wall gutter is 2px.
   the page loads Drive's own thumbnails. Hiding a person removes their face
   from the page, not the photos.
 - **`data.json` is gated.** Each collection has its own secret
-  (`COLLECTION_PASSWORD_<SLUG>`, a Pages secret, at least 16 characters).
+  (`COLLECTION_PASSWORD_<SLUG>`, a Pages secret, at least 6 characters;
+  a longer passphrase is stronger; turn on the Cloudflare rate-limit rule
+  for `POST */__gate`).
   Without it the collection answers 503. The cookie is an HMAC of the
   password scoped to `/<slug>`, so a password change logs everyone out of
   that one collection, and a cookie for one collection never opens another.

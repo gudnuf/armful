@@ -67,7 +67,7 @@ after(() => { for (const t of temps) rmSync(t, { recursive: true, force: true })
 test("the complete dist file list: an explicit manifest, canaries never ship", () => {
   const want = [
     /^_headers$/, /^_redirects$/, /^index\.html$/, /^404\.html$/,
-    /^robots\.txt$/, /^sitemap\.xml$/, /^apple-touch-icon\.png$/, new RegExp(`^static/og\\.${H}\\.png$`),
+    /^robots\.txt$/, /^sitemap\.xml$/, /^apple-touch-icon\.png$/, new RegExp(`^static/og\\.${H}\\.png$`), new RegExp(`^static/favicon\\.${H}\\.svg$`),
     new RegExp(`^static/style\\.${H}\\.css$`), new RegExp(`^static/home\\.${H}\\.css$`), /^static\/fonts\/OFL\.txt$/,
     ...FONTS.map((f) => new RegExp(`^static/fonts/${f}\\.${H}\\.woff2$`)),
     /^example\/index\.html$/, new RegExp(`^example/app\\.${H}\\.js$`), new RegExp(`^example/style\\.${H}\\.css$`),
@@ -100,7 +100,16 @@ test("fingerprints: names carry the content hash, the stylesheet names the hashe
     }
   }
   assert.ok(readFileSync(join(OUT, "example", "data.json")).equals(readFileSync(join(WS, "fixture", "data.json"))));
-  assert.deepEqual(JSON.parse(read("example/door.json")), { title: "example", photo: "DRIVE_FILE_ID", position: "center 30%" });
+  const dj = JSON.parse(read("example/door.json"));
+  assert.deepEqual(Object.keys(dj).sort(), ["dates", "fonts", "name", "photo", "position", "title"]);
+  assert.deepEqual({ ...dj, fonts: undefined }, { title: "example", photo: "DRIVE_FILE_ID", position: "center 30%",
+    name: "Example Weekend", dates: "1 – 3 May 2026", fonts: undefined });
+  // the door's faces: public, hashed, shipped, and the very bytes of site/fonts
+  assert.deepEqual(Object.keys(dj.fonts).sort(), ["display", "label", "text"]);
+  for (const [k, f] of [["display", "bricolage-grotesque-700"], ["label", "inter-600"], ["text", "inter-500"]]) {
+    assert.match(dj.fonts[k], new RegExp(`^/static/fonts/${f}\\.${H}\\.woff2$`), k);
+    assert.ok(readFileSync(join(OUT, dj.fonts[k].slice(1))).equals(readFileSync(join(ROOT, "site", "fonts", `${f}.woff2`))), k);
+  }
 });
 
 test("the collection page references only hashed or shipped files", () => {
@@ -148,6 +157,23 @@ test("the home page", () => {
   const refs = [...html.matchAll(/\s(?:src|href)="([^"#]+)"/g)].map((m) => m[1]).filter((u) => !/^https:/.test(u));
   assert.ok(refs.length >= 2);
   for (const u of refs) assert.match(u, /^(\/static\/|\/apple-touch-icon\.png$)/, u);
+});
+
+test("the home and 404 pages name a hashed favicon; their font preloads name the hashed fonts", () => {
+  for (const page of ["index.html", "404.html"]) {
+    const m = read(page).match(new RegExp(`<link rel="icon" href="/static/(favicon\\.${H}\\.svg)" type="image/svg\\+xml">`));
+    assert.ok(m, `${page}: a favicon link`);
+    assert.ok(readFileSync(join(OUT, "static", m[1])).equals(readFileSync(join(ROOT, "site", "favicon.svg"))), `${page}: ${m[1]} is site/favicon.svg`);
+    assert.doesNotMatch(read(page), /favicon\.svg"/);
+  }
+  for (const [page, prefix] of [["index.html", "/static/"], ["example/index.html", ""]]) {
+    const pre = [...read(page).matchAll(/<link rel="preload" href="([^"]+)" as="font" type="font\/woff2" crossorigin>/g)].map((x) => x[1]);
+    assert.ok(pre.length >= 2, `${page}: font preloads`);
+    for (const u of pre) {
+      assert.match(u, new RegExp(`^${prefix.replace(/\//g, "\\/")}fonts/[a-z0-9-]+\\.${H}\\.woff2$`), u);
+      assert.ok(existsSync(join(OUT, prefix ? u.slice(1) : join("example", u))), `${page}: ${u} is shipped`);
+    }
+  }
 });
 
 test("the home page and its files make no third-party request: GitHub is the only external link", () => {
@@ -334,6 +360,21 @@ test("door.json takes the collection's title when it has one", () => {
   writeFileSync(cfgPath, JSON.stringify({ ...cfg, title: "Example Weekend" }));
   ok(build(ws));
   assert.equal(JSON.parse(readFileSync(join(ws, "dist", "example", "door.json"), "utf8")).title, "Example Weekend");
+});
+
+test("door.json: name and dates only when given; anything but short plain text refuses the build", () => {
+  const ws = workspace();
+  const cfgPath = join(ws, "collections", "example", "collection.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  const { name, dates, ...bare } = cfg;
+  writeFileSync(cfgPath, JSON.stringify(bare));
+  ok(build(ws));
+  const dj = JSON.parse(readFileSync(join(ws, "dist", "example", "door.json"), "utf8"));
+  assert.equal("name" in dj || "dates" in dj, false);
+  for (const bad of [{ name: "x".repeat(61) }, { dates: "x".repeat(41) }, { name: "two\nlines" }, { name: 42 }, { dates: "" }]) {
+    writeFileSync(cfgPath, JSON.stringify({ ...bare, ...bad }));
+    refused(build(ws), /collection\.json: (name|dates) must be/);
+  }
 });
 
 test("refuses to run without the collection's built data.json, and touches nothing", () => {

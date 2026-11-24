@@ -39,7 +39,7 @@ function cookies(request, name) {
   return out;
 }
 
-const MIN_SECRET = 16; // a shorter secret is treated as unset: fail closed
+const MIN_SECRET = 6; // a shorter secret is treated as unset: fail closed
 const MAX_BODY = 4096; // login bodies over this are refused before parsing
 const MAX_TO = 200;    // longer redirect hashes are dropped
 
@@ -73,15 +73,19 @@ export function slugOf(pathname) {
 export const secretName = (slug) => "COLLECTION_PASSWORD_" + slug.toUpperCase().replace(/-/g, "_");
 
 // door.json is written by the build next to the collection's index.html:
-// {"photo":"<drive id>","position":"center 30%","title":"<slug>"}. Read straight
-// from the static assets (not through this middleware). Missing or broken = no photo,
-// and the slug stands in for the title. Only these three fields reach the door.
+// {"photo":"<drive id>","position":"center 30%","title":"<slug>","name":"<display name>",
+// "dates":"<date range>","fonts":{"display","label","text": "/static/fonts/<name>.<hash>.woff2"}}.
+// Read straight from the static assets (not through this middleware). Missing or broken = no
+// photo, and the slug stands in for the title. Only these fields reach the door, which checks each.
 async function doorOpts(env, request, slug) {
   try {
     const r = await env.ASSETS.fetch(new URL(`/${slug}/door.json`, request.url));
     if (!r.ok) return { slug };
     const j = await r.json();
-    return { slug, photo: String(j.photo || ""), position: String(j.position || ""), title: String(j.title || "") };
+    const f = j.fonts && typeof j.fonts === "object" ? j.fonts : {};
+    return { slug, photo: String(j.photo || ""), position: String(j.position || ""), title: String(j.title || ""),
+      name: typeof j.name === "string" ? j.name : "", dates: typeof j.dates === "string" ? j.dates : "",
+      fonts: { display: String(f.display || ""), label: String(f.label || ""), text: String(f.text || "") } };
   } catch {
     return { slug };
   }
@@ -179,5 +183,16 @@ export async function onRequest({ request, env, next }) {
   const type = out.headers.get("Content-Type") || "";
   if (/text\/html|application\/json/.test(type)) out.headers.set("Cache-Control", "private, no-cache");
   else out.headers.set("Cache-Control", privateCache(out.headers.get("Cache-Control")));
+  if (/text\/html/.test(type)) out.headers.set("Content-Security-Policy", PAGE_CSP);
   return out;
 }
+
+// The collection page (behind the gate; the door sets its own): own scripts only, Drive
+// thumbnails (drive.google.com redirects to *.googleusercontent.com) and the Drive video iframe.
+export const PAGE_CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https://drive.google.com https://*.googleusercontent.com data:", "font-src 'self'",
+  "connect-src 'self'", "frame-src https://drive.google.com",
+  "media-src https://drive.google.com https://*.googleusercontent.com",
+  "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'",
+].join("; ");

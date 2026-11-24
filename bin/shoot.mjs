@@ -1,11 +1,12 @@
 // The screenshot set, on the synthetic fixture only (never real data).
 //   node bin/shoot.mjs [--out shots] [--only door,home]
 //   (on a shared machine, optionally under lockf/flock "$ARMFUL_CHROME_LOCK")
-// Screens: door, arrive, one, together, any, previewer, home; widths 375, 390, 768, 1440;
+// Screens: door, arrive, rail, one, together, any, previewer, home; widths 375, 390, 768, 1440;
 // light and dark. Files: <out>/<screen>-<width>-<scheme>.png (shots/ is git-ignored).
 //   door       the password door (functions/_door.js), no photo: the ink ground
 //   arrive     the collection page as it first loads
-//   one        the panel open, one face held
+//   rail       the people rail open beside the wall
+//   one        one face held, the rail folded: the collapsed pill
 //   together   two faces held (person 1 and 2: 9 photos together in the fixture)
 //   any        the pair tapped apart: any
 //   previewer  the first visible photo (not a video) open in the previewer
@@ -79,15 +80,18 @@ const openPanel = async () => {
   await need("#people", "the panel");
   if ((await b.evalJs(`document.getElementById('people').getAttribute('aria-expanded')`)) !== "true") await clickEl("#people");
 };
+// hold faces from the rail, then fold the rail: the shot shows the collapsed pill
 const hold = async (...pids) => {
   await openPanel();
   for (const p of pids) { await need(`#listMain .face[data-pid="${p}"]`, `face ${p} in the list`); await clickEl(`#listMain .face[data-pid="${p}"]`); }
+  if ((await b.evalJs(`document.getElementById('people').getAttribute('aria-expanded')`)) === "true") await clickEl("#people");
 };
 
 const SCREENS = {
   door: async (w, h, m) => { await b.load(w, h, m, OTHER + "/__door", "!!document.querySelector('form.door')").catch(async (e) => {
     if (!/HTTP 401/.test(e.message)) throw e; }); }, // the door is a 401 by design
   arrive: async (w, h, m) => { await b.load(w, h, m, COL, READY); },
+  rail: async (w, h, m) => { await b.load(w, h, m, COL, READY); await openPanel(); },
   one: async (w, h, m) => { await b.load(w, h, m, COL, READY); await hold(1); },
   together: async (w, h, m) => { await b.load(w, h, m, COL, READY); await hold(1, 2); },
   any: async (w, h, m) => {

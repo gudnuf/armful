@@ -34,6 +34,8 @@ Drive folder. The shape:
 {
   "slug": "example",
   "title": "example",
+  "name": "Example Weekend",
+  "dates": "1 – 3 May 2026",
   "drive_folder": "DRIVE_FOLDER_ID",
   "door_photo": "DRIVE_FILE_ID",
   "door_position": "center 30%",
@@ -43,6 +45,9 @@ Drive folder. The shape:
 
 - `slug`: the URL path the collection is served at.
 - `title`: the one title on the page.
+- `name`, `dates` (optional): the door's cover, the collection's display name
+  (at most 60 characters) and a pre-formatted date range (at most 40), plain
+  text. The link preview's title uses `name` when there is one.
 - `drive_folder`: the id of the shared Drive folder holding the photos.
 - `door_photo`, `door_position`: the Drive file shown behind the password
   door, and its CSS `object-position`.
@@ -80,7 +85,7 @@ the tail of that suite's log), runs every suite even after a failure, and
 exits non-zero if any failed. The suites: the guard's own tests, the
 fixture, `build_site`, the dist build, the gate (under `wrangler pages dev`,
 pinned `wrangler@4.167.0` via `npx`), the page suites in headless Chrome
-(tokens, wall, panel, hold, previewer, a11y; a suite whose file does not
+(tokens, wall, panel, hold, previewer, home, cls, csp, a11y; a suite whose file does not
 exist yet is skipped), and the privacy guard on the index and on every
 commit reachable from `HEAD`.
 
@@ -100,6 +105,7 @@ the fixture. `--only door,home` limits the screens, `--out DIR` moves them.
 
 After a deploy, `bin/smoke.sh <base-url> <slug>` checks the live site (see
 `DEPLOY.md`).
+`node bin/smoke-browser.mjs <base-url> <slug>` then walks it in headless Chrome (password from `ARMFUL_PASSWORD` only).
 
 The pieces, one at a time:
 

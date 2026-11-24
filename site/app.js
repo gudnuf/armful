@@ -173,9 +173,10 @@
     for (const [t] of moves) { t.style.transition = ""; t.style.transform = ""; t.style.opacity = ""; }
   }
 
-  // ---- people: the floating panel (desktop) / the rail (phone) ----
+  // ---- people: one pill bottom-left; it opens a narrow rail of faces up the left edge ----
   const BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   let byId = new Map();
+  let peopleN = 0; // people shown in the list (not the +N more)
   const faceEls = new Map(); // person id -> { btn, b } in the list
   let faceIo = null;
   // a face picture: Google's server crop, or for a rotated photo (Google crops the raw, unrotated
@@ -239,10 +240,11 @@
     fillList($("listMore"), rest);
     $("more").hidden = !rest.length;
     $("more").textContent = `+${nf(rest.length)} more`;
-    $("peopleLabel").textContent = `${nf(main.length)} people`;
+    peopleN = main.length;
+    $("peopleLabel").textContent = `${nf(peopleN)} people`;
+    $("stats").textContent = `${nf(peopleN)} people · ${plural(D.files.length, "photo")}`;
     // the collapsed pill's three faces load with the page
     $("people").querySelector(".stack").append(...[...main].sort((a, c) => c.n - a.n).slice(0, 3).map((p) => { const i = faceImg(); paintFace(i, p); return i; }));
-    $("slug").textContent = `${slug} · ${nf(D.files.length)}`;
     updateCounts((pid) => (tilesOf.get(pid) || []).length);
 
     $("people").onclick = () => panelOpen($("list").hidden);
@@ -251,22 +253,19 @@
       $("listMore").hidden = !open;
       $("more").setAttribute("aria-expanded", String(open));
     };
-    // Esc, or a click / tap anywhere outside, folds the list; a tap on the wall only folds it
+    // the rail stays open while the wall scrolls and taps through; only the pill or Esc folds it
+    // (an Esc the previewer already took is not ours)
     addEventListener("keydown", (e) => {
-      if (e.key !== "Escape" || $("list").hidden || !$("lb").hidden) return;
+      if (e.key !== "Escape" || e.defaultPrevented || $("list").hidden || !$("lb").hidden) return;
       e.preventDefault();
       panelOpen(false);
       $("people").focus();
     });
-    document.addEventListener("click", (e) => {
-      if ($("list").hidden || !$("lb").hidden || $("panel").contains(e.target)) return;
-      panelOpen(false);
-      if (e.target.closest?.("#wall")) { e.preventDefault(); e.stopPropagation(); }
-    }, true);
     $("panel").hidden = false;
   }
-  // ---- the hold: who is held, and whether the wall shows photos with all of them (together)
-  // or with any of them (any). The URL keeps it: #p=3.7 / #p=3.7&any ----
+  // ---- the hold: who is held, and whether the wall shows photos with all of them (together, the
+  // default) or with any of them (any: a tap on the held faces, unannounced). The URL keeps it:
+  // #p=3.7 / #p=3.7&any ----
   const state = { picked: [], any: false };
   const plural = (n, w) => `${nf(n)} ${w}${n === 1 ? "" : "s"}`;
   const SPRING = "linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1)";
@@ -282,9 +281,9 @@
     if (!state.picked.length) return n;
     return state.any ? shownN + n - t : t; // any: shown ∪ theirs; together: shown ∩ theirs
   }
-  // the held faces, small, into `el` (the hold; the previewer can reuse it): beyond five, four and +N
+  // the held faces, small, into `el` (the pill; the previewer reuses it): at most four, then +N
   function renderPair(el, picked = state.picked) {
-    const show = picked.length > 5 ? picked.slice(0, 4) : picked;
+    const show = picked.slice(0, 4);
     el.replaceChildren(...show.map((pid) => {
       const s = document.createElement("span"), img = faceImg();
       s.className = "face held"; s.dataset.pid = pid;
@@ -292,41 +291,31 @@
       s.append(img);
       return s;
     }));
-    if (picked.length > 5) { const m = document.createElement("span"); m.className = "more"; m.textContent = `+${nf(picked.length - 4)}`; el.append(m); }
+    if (picked.length > 4) { const m = document.createElement("span"); m.className = "more"; m.textContent = `+${nf(picked.length - 4)}`; el.append(m); }
   }
   function render() {
     const sel = new Set(state.picked), ok = matches(sel, state.any), k = state.picked.length;
     shownN = 0; tally = new Map();
-    let videos = 0;
     ok.forEach((y, i) => {
       if (!y) return;
-      shownN++; if (D.files[i].v) videos++;
+      shownN++;
       for (const p of new Set(D.files[i].p)) tally.set(p, (tally.get(p) || 0) + 1);
     });
     setShown(ok);
     updateCounts(countFor);
     for (const [pid, e] of faceEls) { const h = sel.has(pid); e.btn.classList.toggle("held", h); e.btn.setAttribute("aria-pressed", String(h)); }
-    $("slug").textContent = `${slug} · ${k ? plural(shownN, "photo") : nf(D.files.length)}`;
-    $("hold").hidden = !k;
-    const emptyBtn = $("empty").querySelector("button");
-    emptyBtn.hidden = true;
-    if (!k) return;
+    // the pill: nobody held, three faces and the people; someone held, their faces, the count and ×
+    $("bar").classList.toggle("held", k > 0);
+    $("pair").hidden = $("clear").hidden = !k;
+    $("peopleLabel").textContent = k ? plural(shownN, "photo") : `${nf(peopleN)} people`;
     const pair = $("pair");
     renderPair(pair);
     pair.classList.toggle("tight", !state.any);
     pair.classList.toggle("apart", state.any);
-    if (k === 1) {
-      $("holdText").textContent = plural(shownN - videos, "photo") + (videos ? ` · ${plural(videos, "video")}` : "");
-      $("holdHint").textContent = "tap another face to narrow";
-      pair.setAttribute("aria-label", `Person ${state.picked[0]}, ${plural(shownN, "photo")}`);
-      return;
-    }
-    const other = matches(sel, !state.any).filter(Boolean).length;
-    $("holdText").textContent = `${state.any ? "any" : "together"} · ${plural(shownN, "photo")}`;
-    $("holdHint").textContent = state.any ? `tap the pair to overlap → together · ${nf(other)}` : `tap the pair to separate → any · ${nf(other)}`;
-    pair.setAttribute("aria-label", state.any ? "Any: tap to switch to together" : "Together: tap to switch to any");
-    // nobody together: the "any" line is the next tap
-    if (!shownN && !state.any) { emptyBtn.textContent = `any · ${nf(other)}`; emptyBtn.hidden = false; }
+    pair.setAttribute("aria-label", "Held: " + state.picked.map((p) => `Person ${p}`).join(", "));
+    // nothing together: say so, and offer to let go
+    $("empty").querySelector("p").textContent = k >= 2 && !state.any ? "No photos of them together" : "No photos";
+    $("empty").querySelector("button").hidden = !k;
   }
   function save() {
     const h = state.picked.length ? `#p=${state.picked.join(".")}${state.any ? "&any" : ""}` : "";
@@ -377,9 +366,10 @@
       toggle(pid);
       if (adding) fly(btn, pid);
     });
-    $("pair").onclick = () => { if (state.picked.length >= 2) setAny(!state.any); };
+    // the held faces: two or more toggle together / any; one held, they open the rail like the pill
+    $("pair").onclick = () => { if (state.picked.length >= 2) setAny(!state.any); else panelOpen($("list").hidden); };
     $("clear").onclick = clear;
-    $("empty").querySelector("button").onclick = () => setAny(true);
+    $("empty").querySelector("button").onclick = clear;
     addEventListener("hashchange", () => { load(); render(); });
     load();
     if (state.picked.length) render();
@@ -403,10 +393,22 @@
     $("lbCount").textContent = `${nf(lb.k + 1)} / ${nf(lb.set.length)}`; // files, in wall order
     stage.className = "lbStage"; stage.style.transform = ""; stage.style.opacity = "";
     if (f.v) { // Drive's own player: plays inline, with controls, without leaving the page
-      const fr = document.createElement("iframe");
-      fr.src = `https://drive.google.com/file/d/${encodeURIComponent(f.i)}/preview`;
+      // until it has loaded (and settled), the wall's thumbnail stands in, dimmed, with the
+      // loading mark; then the player fades in over it. Never a bare black frame.
+      const box = document.createElement("div"), poster = new Image(), fr = document.createElement("iframe");
+      box.className = "vid";
+      poster.className = "poster"; poster.alt = ""; poster.referrerPolicy = "no-referrer"; poster.draggable = false;
+      poster.src = tiles[i]?.querySelector("img")?.currentSrc || thumbUrl(f, wallSize());
+      const mark = $("loading").querySelector(".symbol").cloneNode(true);
       fr.allow = "autoplay; fullscreen"; fr.allowFullscreen = true; fr.referrerPolicy = "no-referrer"; fr.title = "Video";
-      stage.replaceChildren(fr);
+      fr.addEventListener("load", () => setTimeout(() => {
+        if (token !== lb.token) return;
+        box.classList.add("ready");
+        setTimeout(() => mark.remove(), 300);
+      }, 300), { once: true });
+      fr.src = `https://drive.google.com/file/d/${encodeURIComponent(f.i)}/preview`;
+      box.append(poster, mark, fr);
+      stage.replaceChildren(box);
     } else {
       const img = new Image();
       img.alt = ""; img.referrerPolicy = "no-referrer"; img.draggable = false;
@@ -429,13 +431,12 @@
     lb.k = lb.set.indexOf(i);
     if (lb.k < 0) return;
     lb.from = tiles[i];
-    // the hold, small at the bottom: the held faces and the word (nothing when no one is held)
+    // the hold, small at the bottom: the held faces only (nothing when no one is held)
     const k = state.picked.length;
     $("lbHold").hidden = !k;
     if (k) {
       renderPair($("lbPair"));
       $("lbPair").className = `pair ${state.any ? "apart" : "tight"}`;
-      $("lbMode").textContent = k >= 2 ? (state.any ? "any" : "together") : "";
     } else $("lbPair").replaceChildren();
     $("lb").hidden = false;
     document.body.classList.add("lbOpen");
@@ -512,15 +513,32 @@
   const loading = $("loading");
   const tryAgain = loading.querySelector("button");
   tryAgain.onclick = () => location.reload();
-  // the fields the wall reads, checked before anything is published or mounted
+  // the fields the wall reads, checked before anything is published or mounted. The shape itself
+  // (an object, a files list, string thumbs templates, a people list) must hold or nothing loads; a
+  // single malformed file or person is dropped instead, so one bad entry never hides the rest.
   const num = (x) => typeof x === "number" && Number.isFinite(x) && x > 0;
-  function valid(d) {
-    if (!d || typeof d !== "object" || !Array.isArray(d.files)) return false;
+  const okFile = (f) => !!f && typeof f === "object" && typeof f.i === "string" && f.i !== "" &&
+    num(f.w) && num(f.h) && Array.isArray(f.p) && (f.v == null || typeof f.v === "number" || typeof f.v === "boolean");
+  const okPerson = (p) => !!p && typeof p === "object" && Number.isInteger(p.id);
+  // the data the page can use, or null; files are filtered before anything indexes them, and a
+  // person's rep (an index into files) follows its file or, if that file was dropped, goes
+  function usable(d) {
+    if (!d || typeof d !== "object" || !Array.isArray(d.files)) return null;
     if (d.thumbs != null && (typeof d.thumbs !== "object" ||
-        ["wall", "face", "big"].some((k) => d.thumbs[k] != null && typeof d.thumbs[k] !== "string"))) return false;
-    if (d.people != null && (!Array.isArray(d.people) || !d.people.every((p) => p && typeof p === "object" && Number.isInteger(p.id)))) return false;
-    return d.files.every((f) => f && typeof f === "object" && typeof f.i === "string" && f.i !== "" &&
-      num(f.w) && num(f.h) && Array.isArray(f.p) && (f.v == null || typeof f.v === "number" || typeof f.v === "boolean"));
+        ["wall", "face", "big"].some((k) => d.thumbs[k] != null && typeof d.thumbs[k] !== "string"))) return null;
+    if (d.people != null && !Array.isArray(d.people)) return null;
+    const at = new Map(), files = [];
+    d.files.forEach((f, k) => { if (okFile(f)) { at.set(k, files.length); files.push(f); } });
+    const people = (d.people || []).filter(okPerson);
+    const skipped = d.files.length - files.length + (d.people || []).length - people.length;
+    if (!files.length) return null;
+    for (const p of people) {
+      if (p.rep == null) continue;
+      if (typeof p.rep === "object" && at.has(p.rep.f)) p.rep.f = at.get(p.rep.f);
+      else delete p.rep;
+    }
+    if (skipped) console.warn(`armful: skipped ${skipped} malformed entries`);
+    return Object.assign(d, { files, people });
   }
   // recent armfuls, for the home page's Recent row (home/index.html documents the shape):
   // newest first, at most 6, one per slug, only { slug, title, door, t }. Never blocks the page.
@@ -554,9 +572,9 @@
   }
   const foot = document.querySelector("footer");
   fetch("data.json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then((d) => {
-    if (!valid(d)) throw new Error("data.json: unexpected shape");
-    D = d;
-    D.people ||= [];
+    const u = usable(d);
+    if (!u) throw new Error("data.json: unexpected shape");
+    D = u;
     buildWall();
     buildPeople();
     buildHold();
