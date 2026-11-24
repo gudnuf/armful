@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 LOGS="$(mktemp -d "${TMPDIR:-/tmp}/armful-check.XXXXXX")"
 trap 'rm -rf "$LOGS"' EXIT
 read -r -a PY <<< "${ARMFUL_PY:-python3}"
-CHROME_SUITES=(tokens wall panel hold previewer home cls csp door flash a11y)
+CHROME_SUITES=(tokens wall panel hold previewer home cls csp door flash transition a11y)
 
 # run <name> <command...>: one ok/FAIL line, the log tail on failure
 run() {
