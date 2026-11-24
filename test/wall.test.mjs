@@ -298,7 +298,7 @@ test("the fixture's malformed last entry (w: 0, h: 0) is dropped: 60 tiles, no e
   assert.equal(await b.evalJs(`armful.D.files.length`), 60);
   assert.equal(await b.evalJs(`document.getElementById('loading').classList.contains('failed')`), false);
   assert.ok(!(await b.evalJs(`document.getElementById('loading').innerText`)).includes("didn’t load"));
-  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "10 people · 60 photos");
+  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
   assert.deepEqual(warns, ["armful: skipped 1 malformed entries"]);
 });
 
@@ -399,7 +399,7 @@ test("the header reserves its height: the wall does not move when the numbers ar
     assert.ok(await b.until(READY));
     const after = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.getElementById('stats').textContent]`);
     assert.deepEqual(after.slice(0, 2), before.slice(0, 2));
-    assert.equal(after[2], "10 people · 60 photos");
+    assert.equal(after[2], "12 people · 60 photos");
   } finally { await b.cdp("Fetch.disable"); off(); }
 });
 

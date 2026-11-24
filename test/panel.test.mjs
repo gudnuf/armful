@@ -37,6 +37,18 @@ before(async () => {
 after(async () => { await b?.close(); await srv?.close(); });
 
 const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
+// text in the pill that is painted (screen-reader-only text sits in a 1px clipped box)
+const NO_TEXT = `(() => { const out = []; const w = document.createTreeWalker(document.getElementById('bar'), NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) { if (!n.textContent.trim()) continue; const r = document.createRange(), box = n.parentElement.getBoundingClientRect(); r.selectNodeContents(n);
+      if (box.width > 1 && box.height > 1 && [...r.getClientRects()].some((x) => x.width > 1 && x.height > 1)) out.push(n.textContent.trim()); } return out; })()`;
+// the header's numbers: right-aligned text, ending within 16px of the right edge
+const rightAligned = async (w) => {
+  const s = await b.evalJs(`(() => { const e = document.getElementById('stats'), r = document.createRange(); r.selectNodeContents(e);
+    const t = r.getBoundingClientRect(); return { right: t.right, align: getComputedStyle(e).textAlign, num: getComputedStyle(e).fontVariantNumeric }; })()`);
+  assert.ok(w - s.right <= 16 && s.right <= w, `${w}: the numbers end ${w - s.right}px from the right edge`);
+  assert.equal(s.align, "right");
+  assert.equal(s.num, "tabular-nums");
+};
 
 test("phone: a header, a compact pill bottom-left; the rail is a narrow column up the left edge", async () => {
   await b.load(390, 844, true, "/example/", READY);
@@ -47,8 +59,9 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
   const mark = await rect(".masthead .mark svg");
   assert.ok(Math.abs(mark.width - 72) <= 1 && mark.left <= 24, `wordmark ${JSON.stringify(mark)}`);
   assert.equal(await b.evalJs(`document.querySelector('.masthead .mark').getAttribute('href')`), "/");
-  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "10 people · 60 photos");
+  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
   assert.ok(Math.abs((await rect("#stats")).top + (await rect("#stats")).height / 2 - (mark.top + mark.height / 2)) <= 3, "one line");
+  await rightAligned(390);
   assert.equal(await b.evalJs(`document.querySelector('#panel .mark, #slug')`), null, "no wordmark or slug in the panel");
   assert.equal((await rect("#wall")).top, head.bottom, "the wall starts under the header");
 
@@ -61,7 +74,9 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
   assert.ok(bar.width < 260, `pill is ${bar.width}px wide`);
   const pill = await rect("#people");
   assert.ok(pill.height >= 44, `pill button is ${pill.height}px tall`);
-  assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "10 people");
+  assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "10 people", "said to screen readers");
+  assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-label')`), "People filter, 10 people");
+  assert.deepEqual(await b.evalJs(NO_TEXT), [], "the pill shows no words");
   assert.equal(await b.evalJs(`document.getElementById('more').textContent.trim()`), "+2 more");
   assert.equal(await visible("#pair"), false);
   assert.equal(await visible("#clear"), false);
@@ -142,7 +157,8 @@ test("phone: the rail stays open while the wall scrolls and opens photos; only t
 
 test("desktop: header top-left, the pill bottom-left, the rail a narrow column above it", async () => {
   await b.load(1440, 900, false, "/example/", READY);
-  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "10 people · 60 photos");
+  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
+  await rightAligned(1440);
   assert.ok((await rect(".masthead .mark")).left <= 24);
   const bar = await rect("#bar");
   assert.ok(bar.left <= 24 && 900 - bar.bottom <= 24, `pill at ${JSON.stringify(bar)}`);

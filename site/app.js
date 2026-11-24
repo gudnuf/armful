@@ -334,7 +334,13 @@
     // the pill: nobody held, three faces and the people; someone held, their faces, the count and ×
     $("bar").classList.toggle("held", k > 0);
     $("pair").hidden = $("clear").hidden = !k;
+    // the pill carries no words; its label (for screen readers) and the header say the numbers
     setText($("peopleLabel"), k ? plural(shownN, "photo") : `${nf(peopleN)} people`);
+    setAttr($("people"), "aria-label", k ? `People filter, ${nf(k)} held, ${plural(shownN, "photo")}` : `People filter, ${nf(peopleN)} people`);
+    // the header follows the wall: the files shown, and everyone (main list and +N more) in them
+    let inShown = 0;
+    for (const pid of tally.keys()) if (byId.has(pid)) inShown++;
+    setText($("stats"), `${nf(inShown)} ${inShown === 1 ? "person" : "people"} · ${plural(shownN, "photo")}`);
     const pair = $("pair");
     renderPair(pair);
     pair.classList.toggle("tight", !state.any);
@@ -607,7 +613,6 @@
     $("wall").append(...tiles);
     drawn.filter = filterKey();
     drawFilter(false);
-    setText($("stats"), `${nf(peopleN)} people · ${plural(D.files.length, "photo")}`);
     loading.hidden = true;
     foot.inert = false;
     $("panel").inert = false;

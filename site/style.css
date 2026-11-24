@@ -106,10 +106,11 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .masthead { display: flex; align-items: center; gap: 14px; height: calc(48px + var(--st)); padding: var(--st) 14px 0; }
 .mark { display: flex; align-items: center; min-height: 44px; color: var(--text); line-height: 0; border-radius: 4px; }
 .mark svg { width: 72px; height: auto; fill: currentColor; }
-.stats { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 156px; }
+/* the numbers sit at the right edge and follow the wall (app.js); reserved width, tabular figures */
+.stats { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 172px; }
 
-/* the people: one compact pill bottom-left (every width). Nobody held: three faces, the people,
-   a chevron. Someone held: their faces, the count, ×. The pill opens a narrow rail of faces up
+/* the people: one compact pill bottom-left (every width), without words. Nobody held: three faces
+   and a chevron. Someone held: their faces, a chevron and ×. The pill opens a narrow rail of faces up
    the left edge, barely veiled; the wall stays visible beside it and keeps scrolling and taking
    taps. The pill never moves. */
 .panel { position: fixed; z-index: 10; left: 0; bottom: 0; width: 0; height: 0; }
@@ -123,7 +124,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   font-variant-numeric: tabular-nums; transition: transform var(--press-t) ease-out, background var(--fade), color var(--fade); }
 .pill:active { transform: scale(var(--press)); }
 .pill:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 2px; }
-.bar.held #people { padding-left: 6px; }
+.bar.held #people { padding: 0 13px; } /* the chevron alone: still a 44px target */
 .bar.held .stack { display: none; }
 .stack { display: flex; flex: none; }
 .stack img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; background: var(--cream); box-shadow: 0 0 0 2px var(--ground); }
@@ -181,7 +182,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   .bar { left: max(18px, var(--sl)); bottom: max(18px, var(--sb)); }
   .list { left: max(12px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 60px);
     max-height: calc(100vh - max(18px, var(--sb)) - 72px); }
-  .masthead { padding: 0 18px; }
+  .masthead { padding: 0 14px 0 18px; }
   /* faces are bigger here: the count, the rings and the held pair scale with them */
   .list li { gap: 8px; }
   .count { font-size: 15px; line-height: 30px; min-width: 36px; padding: 0 9px; }
@@ -237,11 +238,10 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 }
 @media (min-width: 1000px) { .skel i { --n: 4; --S: var(--S4); } }
 @media (min-width: 1600px) { .skel i { --n: 5; --S: var(--S5); } }
-#stats:empty::before, #peopleLabel:empty::before { content: ""; display: inline-block; vertical-align: middle;
+#stats:empty::before { content: ""; display: inline-block; vertical-align: middle;
   height: 8px; border-radius: 4px; background: var(--tile); }
 #stats:empty::before { width: 132px; }
-#peopleLabel:empty::before { width: 72px; }
-.skel, #stats:empty::before, #peopleLabel:empty::before, .stack .sk { animation: breathe 1.6s ease-in-out infinite alternate; }
+.skel, #stats:empty::before, .stack .sk { animation: breathe 1.6s ease-in-out infinite alternate; }
 @keyframes breathe { to { opacity: .6; } }
 body:not([data-phase="skeleton"]) .skel { display: none; }
 @media (prefers-color-scheme: dark) { .stack .sk { background: #2A2F2D; } }

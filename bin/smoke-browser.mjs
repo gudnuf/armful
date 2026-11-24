@@ -125,7 +125,7 @@ async function viewport(b, ev, [w, h, mobile]) {
   try {
     const h = await b.evalJs(`(() => { const m = document.querySelector('.masthead'); return { mark: !!m?.querySelector('.mark svg'),
       text: (document.getElementById('stats')?.textContent || '').trim() }; })()`);
-    const m = h.text.match(/^([\d,.\s]+) people · ([\d,.\s]+) photos?$/);
+    const m = h.text.match(/^([\d,.\s]+) (?:people|person) · ([\d,.\s]+) photos?$/);
     const photos = m ? +m[2].replace(/\D/g, "") : -1;
     check(`${tag} header: wordmark and "${h.text}"`, h.mark && !!m && +m[1].replace(/\D/g, "") > 0 && photos === N,
       `wordmark ${h.mark}, stats ${js(h.text)}, want ${N} photos`);
