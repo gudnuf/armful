@@ -44,9 +44,10 @@ test("light tokens (phone)", async () => {
 });
 
 test("self-hosted fonts are loaded", async () => {
+  // (the metric-matched local fallbacks may also be in use: the first paint can come before the webfonts)
   assert.equal(await b.evalJs(`document.fonts.check('700 20px "Bricolage Grotesque"')`), true);
   assert.equal(await b.evalJs(`document.fonts.check('400 16px Inter')`), true);
-  const loaded = await b.evalJs(`[...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/["']/g, '') + ' ' + f.weight).sort()`);
+  const loaded = await b.evalJs(`[...document.fonts].filter((f) => f.status === 'loaded' && !/Fallback/.test(f.family)).map((f) => f.family.replace(/["']/g, '') + ' ' + f.weight).sort()`);
   assert.deepEqual(loaded, ["Bricolage Grotesque 700", "Inter 400", "Inter 500", "Inter 600"]);
   assert.equal(await b.evalJs(`getComputedStyle(document.body).fontFamily.split(',')[0].replace(/["']/g, '').trim()`), "Inter");
 });
