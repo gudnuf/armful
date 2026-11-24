@@ -798,7 +798,8 @@
     $("lbStage").classList.add(now > was ? "in-next" : "in-prev");
   }
   function lbReveal() {
-    // the query, small at the bottom: the held faces and the filter words (nothing when nothing is chosen)
+    // the query, small at the bottom: the held faces (no words for them, as before) and the
+    // filters' words (nothing when nothing is chosen)
     const k = state.picked.length;
     $("lbHold").hidden = !active();
     $("lbPair").hidden = !k;
@@ -806,7 +807,7 @@
       renderPair($("lbPair"));
       $("lbPair").className = `pair ${state.any ? "apart" : "tight"}`;
     } else $("lbPair").replaceChildren();
-    setText($("lbLine"), terms().join(" · "));
+    setText($("lbLine"), terms().filter((w) => w !== "together" && w !== "any").join(" · "));
     const from = !motion.matches && lbx.from ? lbx.from.getBoundingClientRect() : null;
     $("lb").hidden = false;
     document.body.classList.add("lbOpen");

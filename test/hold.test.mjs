@@ -33,8 +33,9 @@ const openList = async () => {
 };
 const face = async (pid) => { await openList(); await tap(`#list .face[data-pid="${pid}"]`); };
 const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
-// no hint anywhere in the panel (the empty state's one plain sentence is checked on its own)
-const noHints = async () => assert.doesNotMatch(await b.evalJs(`document.getElementById('panel').textContent`), NO_HINTS);
+// no hint anywhere in the panel (the empty state's one plain sentence is checked on its own; the
+// pill's line of filter words says "together" / "any" as a word, checked on its own too)
+const noHints = async () => assert.doesNotMatch(await b.evalJs(`(() => { const p = document.getElementById('panel').cloneNode(true); p.querySelector('#terms').remove(); return p.textContent; })()`), NO_HINTS);
 // the header for the files `idx`: N distinct people in them, their photos and videos
 const stats = (idx) => { const v = idx.filter((i) => D.files[i].v).length; return statsFor(new Set(idx.flatMap((i) => D.files[i].p)).size, idx.length - v, v); };
 const NO_TEXT = `(() => { const out = []; const w = document.createTreeWalker(document.getElementById('bar'), NodeFilter.SHOW_TEXT);
@@ -84,7 +85,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.deepEqual(await shown(), filesWith((p) => p.includes(1) && p.includes(2)));
   assert.equal(await text("peopleLabel"), "9 photos");
   assert.equal(await b.evalJs(STATS), stats(filesWith((p) => p.includes(1) && p.includes(2))), "the header: together");
-  assert.deepEqual(await b.evalJs(NO_TEXT), [], "the pill shows no words");
+  assert.deepEqual(await b.evalJs(NO_TEXT), ["together"], "the pill's line: together, no count");
   await noHints();
   assert.equal(await b.evalJs(`document.getElementById('pair').classList.contains('tight')`), true);
   assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 2);
@@ -95,6 +96,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   const any12 = filesWith((p) => p.includes(1) || p.includes(2));
   assert.equal(await text("peopleLabel"), `${any12.length} photos`);
   assert.equal(await b.evalJs(STATS), stats(any12), "the header: any");
+  assert.deepEqual(await b.evalJs(NO_TEXT), ["any"], "the pill's line: any");
   await noHints();
   assert.equal(await hash(), "#p=1.2&any");
   assert.deepEqual(await shown(), any12);
@@ -136,17 +138,18 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   for (const p of D.people) assert.equal(await count(p.id), String(p.n));
 });
 
-test("collapsed with someone held: one pill bottom-left with the faces, the count and ×", async () => {
+test("collapsed with someone held: one pill bottom-left with the faces, the filter icon, the chevron and ×", async () => {
   for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
     await b.load(w, h, m, "/example/#p=1.2", READY);
     assert.equal(await visible("#list"), false);
     const r = await b.evalJs(`(() => { const g = (id) => document.getElementById(id).getBoundingClientRect(); const bar = g('bar');
       const inside = (e) => e.left >= bar.left - 0.5 && e.right <= bar.right + 0.5 && e.top >= bar.top - 0.5 && e.bottom <= bar.bottom + 0.5;
-      return { left: bar.left, bottom: bar.bottom, height: bar.height, pair: inside(g('pair')), people: inside(g('people')), clear: inside(g('clear')),
+      return { left: bar.left, bottom: bar.bottom, height: bar.height, pair: inside(g('pair')), fbtn: inside(g('fbtn')), chev: inside(g('chev')), clear: inside(g('clear')), people: g('people').width,
         clearW: g('clear').width, faces: document.querySelectorAll('#bar #pair .face').length }; })()`);
     assert.ok(r.left <= 24 && h - r.bottom <= 24, `${w}: pill at ${r.left},${r.bottom}`);
     assert.ok(r.height >= 50 && r.height <= 54, `${w}: ${r.height}px tall`);
-    assert.deepEqual([r.pair, r.people, r.clear, r.faces], [true, true, true, 2], `${w}: all inside the one pill`);
+    assert.deepEqual([r.pair, r.fbtn, r.chev, r.clear, r.faces], [true, true, true, true, 2], `${w}: all inside the one pill`);
+    assert.equal(r.people, 0, `${w}: the held faces stand in for the three`);
     assert.equal(r.clearW, 44);
     assert.equal(await text("peopleLabel"), "9 photos");
     assert.equal(await b.evalJs(`document.querySelectorAll('.panel .hold, #hold, .hint').length`), 0, "no separate hold card");

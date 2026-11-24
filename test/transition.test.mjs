@@ -43,7 +43,7 @@ const WATCH = `(() => {
   });
   const frame = () => {
     const skel = document.getElementById("skel");
-    if (skel && document.body) T.skel = [...skel.children].map(box);
+    if (skel && document.body) T.skel = [...skel.querySelectorAll("i")].map(box); // the blocks, inside one section per day
     T.frames.push({ t: performance.timeOrigin + performance.now(), mark: box(document.querySelector(".masthead .mark svg")),
       stats: box(document.getElementById("stats")), head: box(document.querySelector(".masthead")) });
     if (T.frames.length < 600) requestAnimationFrame(frame);

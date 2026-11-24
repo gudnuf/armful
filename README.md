@@ -85,7 +85,7 @@ the tail of that suite's log), runs every suite even after a failure, and
 exits non-zero if any failed. The suites: the guard's own tests, the
 fixture, `build_site`, the dist build, the gate (under `wrangler pages dev`,
 pinned `wrangler@4.167.0` via `npx`), the page suites in headless Chrome
-(tokens, wall, panel, hold, previewer, home, cls, csp, a11y; a suite whose file does not
+(tokens, wall, panel, hold, filters, previewer, home, cls, csp, a11y; a suite whose file does not
 exist yet is skipped), and the privacy guard on the index and on every
 commit reachable from `HEAD`.
 
