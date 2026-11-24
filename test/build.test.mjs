@@ -148,8 +148,8 @@ test("the home page", () => {
   const html = read("index.html");
   assert.match(html, /<title>armful — armfuls of photos, finally findable<\/title>/);
   assert.match(html, /Armfuls of photos, finally findable\./);
-  assert.ok(html.includes("Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them. Open source."));
-  assert.match(html, /<a class="lbl" href="https:\/\/github\.com\/gudnuf\/armful">GitHub<\/a>/);
+  assert.ok(html.includes("Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them."));
+  assert.match(html, /<a class="lbl" href="https:\/\/github\.com\/gudnuf\/armful" aria-label="Source code on GitHub">source<\/a>/);
   assert.doesNotMatch(html, /noindex/i);
   assert.match(html, /<svg[^>]*class="mark"[^>]*role="img"[^>]*aria-label="armful"/);
   assert.doesNotMatch(html, /<!-- mark -->|example/);
@@ -202,13 +202,13 @@ test("the home page head: description, canonical, Open Graph, Twitter, icons, JS
     return all[0][1];
   };
   const desc = meta("name", "description");
-  assert.equal(desc, "Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them. Open source.");
+  assert.equal(desc, "Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them.");
   assert.ok(desc.length <= 155, `description ${desc.length} chars`);
   assert.match(head, /<link rel="canonical" href="https:\/\/armful\.photos\/">/);
   assert.equal(meta("property", "og:type"), "website");
   assert.equal(meta("property", "og:site_name"), "armful");
   assert.equal(meta("property", "og:title"), "armful");
-  const ogDesc = "Armfuls of photos, finally findable. Find your friends in the group's photos. Open source.";
+  const ogDesc = "Armfuls of photos, finally findable. Find your friends in the group's photos.";
   assert.equal(meta("property", "og:description"), ogDesc);
   assert.equal(meta("property", "og:url"), "https://armful.photos/");
   const img = meta("property", "og:image");
