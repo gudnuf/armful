@@ -89,7 +89,7 @@ command rm -f "$(git rev-parse --git-common-dir)/armful-private-patterns"
 for p in pipeline/scan/IMG_1.dng site/a.webp x/b.HEIF c.TIFF d.m4v e.Mkv; do
   reset; stage "$p"; expect 1 "media type: $p -> exit 1"
 done
-for p in pipeline/scan/crops/f.txt site/state/s.txt deep/shots/a.txt functions/.wrangler/x pipeline/x/data.json a/.dev.vars; do
+for p in pipeline/scan/crops/f.txt site/state/s.txt deep/shots/a.txt functions/.wrangler/x pipeline/x/data.json x/merges.json a/.dev.vars; do
   reset; stage "$p"; expect 1 "private path at depth: $p -> exit 1"
 done
 

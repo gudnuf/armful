@@ -2,7 +2,7 @@
 # check-no-private.sh: fail closed if anything private is tracked, staged or pushed.
 #
 # armful is a public repo. Rules:
-#   1. path rules: page data, hidden lists, scan output, photos, video (every
+#   1. path rules: page data, hidden and merge lists, scan output, photos, video (every
 #      type the pipeline reads, any case), per-collection config (anything
 #      under collections/ except example/), wrangler secrets and state, face
 #      crops, screenshots, local state (those dirs at any depth);
@@ -90,7 +90,7 @@ keyed_hit() {
 # check_path PATH WHERE: rule 1, and rule 4 on the name itself
 check_path() {
   local p="$1" where="$2"
-  if printf '%s\n' "$p" | grep -E '(^|/)(data|hidden)\.json$|(^|/)\.dev\.vars$|(^|/)(shots|state|crops|\.wrangler)/' >/dev/null; then
+  if printf '%s\n' "$p" | grep -E '(^|/)(data|hidden|merges)\.json$|(^|/)\.dev\.vars$|(^|/)(shots|state|crops|\.wrangler)/' >/dev/null; then
     flag "$where$p (forbidden path)"
   elif printf '%s\n' "$p" | grep -E '(^|/)local\.env$' >/dev/null; then
     flag "$where$p (local env: real paths)"

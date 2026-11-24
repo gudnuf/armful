@@ -150,6 +150,24 @@ def hidden_ids(raw, where):
     return set(raw)
 
 
+def merge_map(raw, where):
+    """merges.json: {"<dup id>": <canonical id>}. Shape only here (no self-merges, no chains, so no
+    cycles); whether the ids exist and are clear people is checked once people are known."""
+    if not isinstance(raw, dict):
+        sys.exit(f"{where}: merges must be a JSON object {{\"<dup id>\": <canonical id>}}; nothing written")
+    out = {}
+    for k, v in raw.items():
+        if not (isinstance(k, str) and k.isdigit()) or not isinstance(v, int) or isinstance(v, bool):
+            sys.exit(f"{where}: {k!r}: {v!r}: keys must be person ids as strings and values person ids; nothing written")
+        if int(k) == v:
+            sys.exit(f"{where}: {k} is merged into itself; nothing written")
+        out[int(k)] = v
+    chained = sorted(set(out) & set(out.values()))
+    if chained:
+        sys.exit(f"{where}: id(s) {chained} are both merged away and merged into (no chains: name the final id); nothing written")
+    return out
+
+
 def main(argv=None):
     ap = collection.parser(__doc__)
     ap.add_argument("--out", help="folder to write data.json into (default: <collection>/dist)")
@@ -163,6 +181,11 @@ def main(argv=None):
         "--ffprobe",
         default="ffprobe",
         help="ffprobe to read video capture times and missing video sizes with (default: ffprobe on PATH; without it videos get no time)",
+    )
+    ap.add_argument(
+        "--keep-uncertain",
+        action="store_true",
+        help="keep uncertain people in data.json, marked x: 1 (debugging; the page ignores them)",
     )
     args = ap.parse_args(argv)
     thresh = args.merge
@@ -179,6 +202,7 @@ def main(argv=None):
     st = collection.state_dir(col, make=False)
     state_f = os.path.join(st, "person_faces.json")
     hidden_f = os.path.join(col, "hidden.json")
+    merges_f = os.path.join(col, "merges.json")
     data_f = os.path.join(out_dir, "data.json")
     written = [data_f] + [os.path.join(st, n) for n in ("person_faces.json", "reps.json", "build_report.json")]
     for w in written:
@@ -197,6 +221,14 @@ def main(argv=None):
         except (OSError, ValueError) as e:
             sys.exit(f"{hidden_f}: hidden list is not valid JSON ({e}); nothing written")
         hidden |= hidden_ids(raw, hidden_f)
+    merge_to = {}
+    if os.path.exists(merges_f):
+        try:
+            with open(merges_f, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, ValueError) as e:
+            sys.exit(f"{merges_f}: merges are not valid JSON ({e}); nothing written")
+        merge_to = merge_map(raw, merges_f)
     prev = {}
     if os.path.exists(state_f):
         try:
@@ -317,20 +349,15 @@ def main(argv=None):
     for k, gs in seen.items():
         nfaces[k] = max(nfaces[k], len(gs))
     kidx = {k: i for i, k in enumerate(keys)}
-    ppl_in = defaultdict(set)  # file index -> person ids
-    people = []
+    entries = {}  # person id -> (photo keys, video keys, page entry); hidden people too, for merges
     reps = {}  # local only (state/): person id -> representative face id + crop file, for review
     for g in order:
         pid = gid[g]
-        if pid in hidden:
-            continue
         fs = [r for r in gfaces[g] if r["file_key"] in kidx]
         pf = {r["file_key"] for r in fs if r["kind"] == "photo"}
         vf = {r["file_key"] for r in fs if r["kind"] == "video"}
         if not pf:
             continue  # no photo face to show: video-only people are left out
-        for k in pf | vf:
-            ppl_in[kidx[k]].add(pid)
         # representative: a core face that fills a good share of its photo (so a
         # small Drive thumbnail is enough), sharp, confident, close to centroid
         best, score = None, -1.0
@@ -375,11 +402,11 @@ def main(argv=None):
             and float(best["sharp"]) >= MAIN_REP_SHARP
             and upright(best)
         )
-        reps[pid] = dict(face=best["face_id"], crop=best["crop"])
+        if pid not in hidden:
+            reps[pid] = dict(face=best["face_id"], crop=best["crop"])
         need = REP_PX * W / s  # thumbnail width that makes the crop ~REP_PX wide
         sz = next((z for z in SIZES if z >= need), SIZES[-1])
-        people.append(
-            dict(
+        entries[pid] = (pf, vf, dict(
                 id=pid,
                 n=len(pf),
                 nv=len(vf),
@@ -396,8 +423,36 @@ def main(argv=None):
                     sz=sz,
                     **({} if server_crop_ok(p["rel"]) else {"c": 1}),
                 ),
-            )
-        )
+            ))
+
+    # merges: checked against the people now known (still before anything is written)
+    for dup, canon in sorted(merge_to.items()):
+        for what, i in (("merged id", dup), ("canonical id", canon)):
+            if i not in entries:
+                sys.exit(f"{merges_f}: {what} {i} ({dup} -> {canon}) is no person on any photo; nothing written")
+            if "x" in entries[i][2]:
+                sys.exit(f"{merges_f}: {what} {i} ({dup} -> {canon}) is an uncertain person: only clear people merge; nothing written")
+    members = defaultdict(list)  # canonical id -> every id folded into it (itself first)
+    for pid in entries:
+        members[merge_to.get(pid, pid)].append(pid)
+    hidden_eff = {m for ms in members.values() if any(i in hidden for i in ms) for m in ms} | hidden
+    ppl_in = defaultdict(set)  # file index -> person ids
+    people = []
+    uncertain = 0
+    for canon, ms in members.items():
+        if canon in hidden_eff:
+            continue
+        pf, vf, entry = entries[canon]
+        if "x" in entry:
+            uncertain += 1
+            if not args.keep_uncertain:
+                continue  # never on the page: their faces still count in nf
+        for m in ms[1:]:
+            pf, vf = pf | entries[m][0], vf | entries[m][1]
+        for k in pf | vf:
+            ppl_in[kidx[k]].add(canon)
+        people.append(dict(entry, n=len(pf), nv=len(vf)))
+    reps = {pid: r for pid, r in reps.items() if pid not in hidden_eff and pid not in merge_to}
     people.sort(key=lambda q: (-q["n"], -q["nv"], q["id"]))
 
     files = []
@@ -436,7 +491,11 @@ def main(argv=None):
                 people_on_page=len(people),
                 people_3plus=sum(q["n"] >= 3 for q in people),
                 people_main=sum("x" not in q for q in people),
+                uncertain=uncertain,
+                uncertain_kept=bool(args.keep_uncertain),
+                merged=sorted([d, c] for d, c in merge_to.items()),
                 hidden=sorted(hidden),
+                hidden_by_merge=sorted(hidden_eff - hidden),
                 photos=len(photo_keys),
                 videos=len(video_keys),
                 timed_photos=sum(k in when for k in photo_keys),
@@ -449,7 +508,8 @@ def main(argv=None):
     )
     print(
         f"clusters {len(C)} -> people {len(groups)} ({len(merges)} merges at {thresh}); "
-        f"on page {len(people)}, 3+ photos {sum(q['n'] >= 3 for q in people)}, main sky {sum('x' not in q for q in people)}; "
+        f"on page {len(people)} ({uncertain} uncertain {'kept' if args.keep_uncertain else 'left out'}, {len(merge_to)} merged away), "
+        f"3+ photos {sum(q['n'] >= 3 for q in people)}; "
         f"files {len(photo_keys)} photos + {len(video_keys)} videos ({len(when)} with a time"
         f"{f', {len(probed)} sized from the file' if probed else ''}{f', {len(dropped)} left out: no size' if dropped else ''}); "
         f"hidden {len(hidden)}; "

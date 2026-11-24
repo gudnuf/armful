@@ -33,6 +33,7 @@ and `source` it in the shell you run the pipeline from.
 collections/<slug>/
   collection.json   slug, title, drive_folder, door_photo, door_position, hidden, tz
   hidden.json       optional: person ids never shown (joined with collection.json "hidden")
+  merges.json       optional: {"<dup id>": <canonical id>, ...} people the scan split in two
   state/            person_faces.json (stable person ids), reps.json, reports
   dist/data.json    the built page data (default output)
 ```
@@ -42,6 +43,14 @@ collections/<slug>/
 `data.json` so the page can group files by local day, and it is the zone a
 camera clock without an offset is read in (see capture times below). An
 unknown zone stops the build before anything is written.
+
+`merges.json` folds a person the scan split into several clusters back into
+one: each duplicate id's files join the canonical id's (the canonical keeps its
+face; counts are recomputed). Both ids must be clear people (see below), no id
+may be both merged away and merged into, and a bad file stops the build before
+anything is written. Hiding either id hides the merged person. Person ids
+themselves never change: the duplicate keeps its id in `person_faces.json`, it
+just never reaches the page.
 
 `state/person_faces.json` is what keeps person ids stable across rebuilds,
 and hidden ids refer to it: keep it with the collection, and never rebuild a
@@ -66,7 +75,7 @@ python -I pipeline/scan/scan.py --videos
 python -I pipeline/scan/cluster.py
 
 # 3. build the page data: writes collections/<slug>/dist/data.json
-python -I pipeline/gallery/build_site.py --collection collections/<slug> [--out DIR] [--merge 0.50] [--ffprobe PATH]
+python -I pipeline/gallery/build_site.py --collection collections/<slug> [--out DIR] [--merge 0.50] [--ffprobe PATH] [--keep-uncertain]
 
 # 4. check it (network: fetches Drive thumbnails in memory, saves nothing)
 python -I pipeline/gallery/verify_thumbs.py --collection collections/<slug>
@@ -82,7 +91,13 @@ writing anything, then writes `data.json`, then the id map, each atomically.
 
 `data.json` holds the collection's `slug` and `title`, a `built` date, `tz`
 (when collection.json has one), `files` and `people` (id, photo and video
-counts, the representative face box). No embeddings, file names, names or
+counts, the representative face box). `people` holds clear people only: someone on fewer
+than three photos, with fewer than two good faces, or without one clear,
+upright face to show is "uncertain" and is left out entirely (not listed, and
+their id is on no file), so every count on the page is of clear people. Their
+faces still count in `nf`, and their ids stay in `person_faces.json`.
+`--keep-uncertain` keeps them in, marked `x: 1`, for debugging (the page
+ignores them). No embeddings, file names, names or
 bursts: every file is its own tile. Each entry of `files`:
 
 | key | what it is |

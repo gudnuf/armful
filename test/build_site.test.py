@@ -2,8 +2,8 @@
 """build_site.py on a tiny synthetic scan: per-collection paths, no bursts.
 
 run: python3 -I test/build_site.test.py   (needs numpy + Pillow)
-Everything is made up and lives in a temp dir: 3 placeholder files, 3 face
-clusters (one of them hidden), no real ids, names or paths. A few tests point
+Everything is made up and lives in a temp dir: a few placeholder files and face
+clusters, no real ids, names or paths. A few tests point
 the build at this checkout itself to check it refuses (nothing is written) or,
 for git-ignored dist/, writes to a throwaway folder that is removed again.
 """
@@ -22,6 +22,10 @@ from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "pipeline", "gallery", "build_site.py")
 THUMBS = os.path.join(ROOT, "pipeline", "gallery", "verify_thumbs.py")
+# the synthetic people below have one to four photos each, so all of them are "uncertain" (too few
+# photos to be sure): the suites that test ids, hiding, times and sizes keep them in (KEEP); the
+# ClearPeople and Merges suites test the default, where uncertain people are left out
+KEEP = "--keep-uncertain"
 
 FACE_HDR = ["face_id", "file_key", "kind", "t", "x1", "y1", "x2", "y2", "det", "sharp", "roll", "crop"]
 # (face id, file, cluster): person A in f1 + f3, person B in f2 + f3, a third person in f1 only
@@ -74,7 +78,7 @@ def make_scan(tmp, faces=FACES):
     for n, (_f, _k, c) in enumerate(faces):
         emb[n, c] = 1.0  # one orthogonal direction per person: nothing merges
     np.save(os.path.join(data, "emb.npy"), emb)
-    np.save(os.path.join(data, "centroids.npy"), np.eye(3, 8, dtype=np.float32))
+    np.save(os.path.join(data, "centroids.npy"), np.eye(max(3, 1 + max(c for _f, _k, c in faces)), 8, dtype=np.float32))
     return scan, footage
 
 
@@ -111,7 +115,8 @@ class BuildSite(unittest.TestCase):
         self.env.pop("ARMFUL_COLLECTION", None)
 
     def build(self, *args, env=None, ok=True, script=BUILD):
-        r = subprocess.run([sys.executable, "-I", script, *args], env=env or self.env, capture_output=True, text=True, cwd=self.tmp)
+        extra = [KEEP] if script == BUILD else []
+        r = subprocess.run([sys.executable, "-I", script, *args, *extra], env=env or self.env, capture_output=True, text=True, cwd=self.tmp)
         if ok:
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         else:
@@ -307,6 +312,162 @@ class BuildSite(unittest.TestCase):
         self.assertEqual(rep["problems"], [])
 
 
+# clear and uncertain people: A, B and D each on 3 photos with good faces (clear); C on one photo
+# and E on two (uncertain: too few photos). Five orthogonal clusters: nothing merges by itself.
+CFACES = [
+    ("a1", "f1", 0), ("a2", "f2", 0), ("a3", "f3", 0),
+    ("b1", "f2", 1), ("b2", "f3", 1), ("b3", "f4", 1),
+    ("c1", "f1", 2),
+    ("d1", "f4", 3), ("d2", "f5", 3), ("d3", "f6", 3),
+    ("e1", "f5", 4), ("e2", "f6", 4),
+]
+
+
+class ClearScan(unittest.TestCase):
+    """The CFACES scan in a temp dir, one collection, and helpers (no tests of its own)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        scan, footage = make_scan(self.tmp, CFACES)
+        self.env = dict(os.environ, ARMFUL_SCAN_ROOT=scan, ARMFUL_FOOTAGE=footage)
+        self.env.pop("ARMFUL_COLLECTION", None)
+        self.col = make_collection(self.tmp, [])
+
+    def build(self, *args, ok=True):
+        r = subprocess.run([sys.executable, "-I", BUILD, "--collection", self.col, *args], env=self.env,
+                           capture_output=True, text=True, cwd=self.tmp)
+        (self.assertEqual if ok else self.assertNotEqual)(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
+    def data(self):
+        return load(os.path.join(self.col, "dist", "data.json"))
+
+    def ids(self):
+        return load(os.path.join(self.col, "state", "person_faces.json"))
+
+    def of(self, face):
+        return next(int(pid) for pid, fids in self.ids().items() if face in fids)
+
+
+class ClearPeople(ClearScan):
+    """By default data.json holds clear people only: uncertain ones are in no list and on no file."""
+
+    def test_uncertain_people_are_left_out(self):
+        self.build()
+        d = self.data()
+        clear = {self.of(f) for f in ("a1", "b1", "d1")}
+        self.assertEqual({p["id"] for p in d["people"]}, clear)
+        self.assertTrue(all("x" not in p for p in d["people"]))
+        self.assertEqual({i for f in d["files"] for i in f["p"]}, clear, "an uncertain id is still on a file")
+        by = {f["i"]: f for f in d["files"]}
+        self.assertEqual(by["FAKE_ID_1"]["p"], [self.of("a1")])
+        self.assertEqual(by["FAKE_ID_1"]["nf"], 2, "C is left out but still a face")
+        self.assertEqual(by["FAKE_ID_5"]["nf"], 2)
+        for p in d["people"]:
+            self.assertEqual(p["n"], sum(p["id"] in f["p"] for f in d["files"]))
+            self.assertIn(p["id"], d["files"][p["rep"]["f"]]["p"])
+        # their ids are kept (a later scan may make them clear, and hidden ids must keep meaning the same)
+        self.assertEqual(len(self.ids()), 5)
+        rep = load(os.path.join(self.col, "state", "build_report.json"))
+        self.assertEqual((rep["people_on_page"], rep["uncertain"], rep["uncertain_kept"]), (3, 2, False))
+
+    def test_keep_uncertain_flag_and_same_ids(self):
+        self.build()
+        d1, ids1 = self.data(), self.ids()
+        self.build(KEEP)
+        d2 = self.data()
+        self.assertEqual(self.ids(), ids1, "the flag moved an id")
+        self.assertEqual(len(d2["people"]), 5)
+        self.assertEqual(sorted(p["id"] for p in d2["people"] if p.get("x") == 1), sorted([self.of("c1"), self.of("e1")]))
+        self.assertEqual([p for p in d2["people"] if "x" not in p], d1["people"])
+        self.build()
+        self.assertEqual(self.data(), d1)
+
+    def test_hidden_still_works(self):
+        self.build()
+        b = self.of("b1")
+        dump([b], os.path.join(self.col, "hidden.json"))
+        self.build()
+        d = self.data()
+        self.assertNotIn(b, {p["id"] for p in d["people"]})
+        self.assertTrue(all(b not in f["p"] for f in d["files"]))
+        self.assertEqual(len(d["people"]), 2)
+
+
+class Merges(ClearScan):
+    """merges.json folds duplicate ids onto one canonical id."""
+
+    def merge(self, m):
+        dump(m, os.path.join(self.col, "merges.json"))
+
+    def test_merge_folds_files_and_keeps_canonical_face(self):
+        self.build()
+        d0, ids0 = self.data(), self.ids()
+        a, dd = self.of("a1"), self.of("d1")
+        self.merge({str(dd): a})
+        self.build()
+        d = self.data()
+        self.assertEqual(self.ids(), ids0, "a merge moved an id")
+        self.assertEqual({p["id"] for p in d["people"]}, {a, self.of("b1")})
+        pa = next(p for p in d["people"] if p["id"] == a)
+        self.assertEqual((pa["n"], pa["nv"]), (6, 0), "A's files and D's, once each")
+        self.assertTrue(all(dd not in f["p"] for f in d["files"]))
+        self.assertEqual(sum(a in f["p"] for f in d["files"]), 6)
+        rep0 = next(p for p in d0["people"] if p["id"] == a)["rep"]
+        self.assertEqual(d["files"][pa["rep"]["f"]]["i"], d0["files"][rep0["f"]]["i"], "canonical's face kept")
+        self.assertEqual(pa["rep"]["box"], rep0["box"])
+        self.assertEqual(d["people"][0]["id"], a, "counts recomputed: A now leads")
+        self.assertEqual(load(os.path.join(self.col, "state", "build_report.json"))["merged"], [[dd, a]])
+
+    def test_merge_shares_a_photo_counts_it_once(self):
+        self.build()
+        a, b = self.of("a1"), self.of("b1")
+        self.merge({str(b): a})
+        self.build()
+        pa = next(p for p in self.data()["people"] if p["id"] == a)
+        self.assertEqual(pa["n"], 4)  # f1-f3 and f4
+        self.assertTrue(all(f["p"].count(a) <= 1 for f in self.data()["files"]))
+
+    def test_hidden_canonical_hides_what_is_merged_into_it(self):
+        self.build()
+        a, dd, b = self.of("a1"), self.of("d1"), self.of("b1")
+        self.merge({str(dd): a})
+        for hide in (a, dd):  # hiding the canonical id or the merged one hides the person
+            with self.subTest(hidden=hide):
+                dump([hide], os.path.join(self.col, "hidden.json"))
+                self.build()
+                d = self.data()
+                self.assertEqual([p["id"] for p in d["people"]], [b])
+                self.assertEqual({i for f in d["files"] for i in f["p"]}, {b})
+
+    def test_bad_merges_write_nothing(self):
+        self.build()
+        a, b, dd, c = self.of("a1"), self.of("b1"), self.of("d1"), self.of("c1")
+        before = snapshot(os.path.join(self.col, "state"), os.path.join(self.col, "dist"))
+        for bad, why in (
+            ("[1, 2]", "a JSON object"),
+            ('{"x": 1}', "person ids"),
+            (json.dumps({str(a): "1"}), "person ids"),
+            (json.dumps({str(a): a}), "itself"),
+            (json.dumps({str(dd): b, str(b): a}), "chains"),
+            (json.dumps({str(dd): b, str(b): dd}), "chains"),
+            (json.dumps({str(dd): 999}), "no person"),
+            (json.dumps({"999": a}), "no person"),
+            (json.dumps({str(c): a}), "uncertain"),
+            (json.dumps({str(a): c}), "uncertain"),
+            ("{", "not valid JSON"),
+        ):
+            with self.subTest(merges=bad):
+                with open(os.path.join(self.col, "merges.json"), "w") as f:
+                    f.write(bad)
+                r = self.build(ok=False)
+                self.assertIn(why, r.stdout + r.stderr)
+                self.assertIn("nothing written", r.stdout + r.stderr)
+                self.assertEqual(snapshot(os.path.join(self.col, "state"), os.path.join(self.col, "dist")), before)
+
+
 def write_jpeg(path, when=None, offset=None):
     """A tiny placeholder JPEG; `when` "YYYY:MM:DD HH:MM:SS" goes in EXIF DateTimeOriginal."""
     exif = Image.Exif()
@@ -382,7 +543,7 @@ class TimeAndFaces(unittest.TestCase):
         open(os.path.join(self.drive, "f5.mov"), "wb").close()
 
     def build(self, *args, ok=True):
-        r = subprocess.run([sys.executable, "-I", BUILD, *args], env=self.env, capture_output=True, text=True, cwd=self.tmp)
+        r = subprocess.run([sys.executable, "-I", BUILD, *args, KEEP], env=self.env, capture_output=True, text=True, cwd=self.tmp)
         (self.assertEqual if ok else self.assertNotEqual)(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -547,7 +708,7 @@ esac
             open(os.path.join(self.drive, f"{k}.mov"), "wb").close()
 
     def build(self, col, *args, ok=True):
-        r = subprocess.run([sys.executable, "-I", BUILD, "--collection", col, *args], env=self.env,
+        r = subprocess.run([sys.executable, "-I", BUILD, "--collection", col, *args, KEEP], env=self.env,
                            capture_output=True, text=True, cwd=self.tmp)
         (self.assertEqual if ok else self.assertNotEqual)(r.returncode, 0, r.stdout + r.stderr)
         return r
