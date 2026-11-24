@@ -350,7 +350,8 @@ test("the wall: in time order by day, a sticky label naming the day and the part
   await b.evalJs(`armful.tiles[12].scrollIntoView({ block: 'start' }); scrollBy(0, 20)`);
   assert.ok(await b.until(`document.querySelector('#wall .day .tag span').textContent === 'Day 1 · evening'`, 2000), "the label follows the row under it");
   const t = await b.evalJs(`document.querySelector('#wall .day .tag span').getBoundingClientRect().toJSON()`);
-  assert.ok(t.top >= 0 && t.top <= 24, `stuck at the top: ${t.top}`);
+  const head = await b.evalJs(`document.querySelector('.masthead').getBoundingClientRect().bottom`);
+  assert.ok(t.top >= head && t.top <= head + 24, `stuck just under the header (${head}): ${t.top}`);
   // file 14 (01:30 the next calendar day) is in day 1's section; the undated are in no day
   assert.equal(await b.evalJs(`armful.tiles[14].closest('.day').dataset.day`), "1");
   for (let d = 1; d <= 4; d++) {
@@ -382,6 +383,72 @@ test("the scrubber fades in while scrolling, navigates, and never filters", asyn
   assert.deepEqual({ shown: await shown(), hash: await hash() }, before, "the scrubber never filters");
   assert.deepEqual(await b.evalJs(`[armful.state.d, armful.state.part, armful.state.n, armful.state.s]`), [null, null, null, null]);
   assert.ok(await b.until(`!document.getElementById('scrub').classList.contains('on')`, 3000), "it fades after the wall stops");
+  mobile = true;
+});
+
+test("the header sticks: after 2000px it is at the top, the day label just under it, nothing shifted", async () => {
+  for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
+    mobile = m;
+    await b.load(w, h, m, "/example/", READY);
+    await sleep(600);
+    const head0 = await b.evalJs(`document.querySelector('.masthead').getBoundingClientRect().toJSON()`);
+    const row0 = await b.evalJs(`document.querySelector('#wall .tile').getBoundingClientRect().top`);
+    assert.equal(row0, head0.bottom, `${w}: the wall starts under the header`);
+    await b.evalJs(`window.__cls = 0; window.__shifts = []`);
+    for (let k = 0; k < 10; k++) { await b.evalJs(`scrollBy(0, 200)`); await sleep(60); }
+    await sleep(500);
+    const s = await b.evalJs(`(() => { const hd = document.querySelector('.masthead').getBoundingClientRect(), st = document.getElementById('stats').getBoundingClientRect();
+      const tags = [...document.querySelectorAll('#wall .day:not([hidden]) .tag span')].map((t) => t.getBoundingClientRect()).filter((r) => r.bottom > 0 && r.top < innerHeight);
+      return { y: scrollY, top: hd.top, bottom: hd.bottom, h: hd.height, stats: st.top >= hd.top && st.bottom <= hd.bottom && st.width > 0,
+        tag: Math.min(...tags.map((r) => r.top)), bg: getComputedStyle(document.querySelector('.masthead')).backgroundColor,
+        cls: window.__cls, shifts: window.__shifts }; })()`);
+    assert.equal(s.y, 2000);
+    assert.deepEqual([s.top, s.h, s.stats], [0, 48, true], `${w}: the header (wordmark and counts) is at the top`);
+    assert.ok(s.tag >= s.bottom, `${w}: the day label (${s.tag}) is below the header (${s.bottom})`);
+    assert.notEqual(s.bg, "rgba(0, 0, 0, 0)", "opaque over the wall");
+    assert.equal(s.cls, 0, `${w}: CLS ${s.shifts.join(" | ")}`);
+    // a jump to a day lands its first row below the header, not under it
+    await b.evalJs(`document.querySelector('#wall .day[data-day="3"]').scrollIntoView()`);
+    await sleep(200);
+    const d3 = await b.evalJs(`document.querySelector('#wall .day[data-day="3"] .tile').getBoundingClientRect().top`);
+    assert.ok(Math.abs(d3 - s.bottom) < 1, `${w}: day 3's first row at ${d3}, the header ends at ${s.bottom}`);
+    // the previewer covers it
+    await press(`[...document.querySelectorAll('#wall .tile')].find((t) => t.getBoundingClientRect().top > 200 && t.getBoundingClientRect().bottom < innerHeight - 120)`);
+    assert.ok(await b.until(`!document.getElementById('lb').hidden`, 2000));
+    assert.equal(await b.evalJs(`document.elementFromPoint(40, 24)?.closest('.masthead') ? 'header' : 'previewer'`), "previewer");
+    await b.key("Escape", 27);
+  }
+  mobile = true;
+});
+
+test("open, the panel never meets the header or the day label: both views, scrolled, phone and desktop", async () => {
+  for (const [w, h, m] of [[390, 844, true], [390, 600, true], [1440, 900, false], [1000, 640, false]]) {
+    mobile = m;
+    await b.load(w, h, m, "/example/#p=1", READY); // someone held: clear all shows
+    for (const view of ["faces", "filters"]) {
+      await b.evalJs(`armful.openView(${js(view)})`);
+      await settled();
+      for (const y of [0, 700, 2000]) {
+        await b.evalJs(`scrollTo(0, ${y})`);
+        await sleep(150);
+        const r = await b.evalJs(`(() => { const box = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; };
+          const panel = document.getElementById(${js(view === "faces" ? "list" : "filters")});
+          const tags = [...document.querySelectorAll('#wall .day:not([hidden]) .tag span')].filter((t) => getComputedStyle(t).visibility === 'visible').map(box).filter((b) => b[3] > 0 && b[1] < innerHeight);
+          const stuck = [...document.querySelectorAll('#wall .day:not([hidden]) .tag span')].filter((t) => getComputedStyle(t).visibility === 'visible' && Math.abs(t.getBoundingClientRect().top - document.querySelector('.masthead').getBoundingClientRect().bottom - 8) < 1).length;
+          return { head: box(document.querySelector('.masthead')), tags, clear: box(panel.querySelector('.clearAll')), clearOn: panel.querySelector('.clearAll').classList.contains('on'),
+            stuck, panel: box(panel), kids: [...panel.querySelectorAll('li, .lbl, .opt')].map(box).filter((b) => b[3] - b[1] > 0) }; })()`);
+        const meet = (a, c) => a[0] < c[2] && c[0] < a[2] && a[1] < c[3] && c[1] < a[3];
+        const tag = `${w}x${h} ${view} at ${y}`;
+        assert.ok(r.clearOn, `${tag}: clear all is there`);
+        if (y >= 700) assert.equal(r.stuck, 1, `${tag}: the stuck day label stays in view (only labels under the panel yield)`);
+        for (const other of [r.head, ...r.tags]) {
+          assert.ok(!meet(r.clear, other), `${tag}: clear all ${r.clear} meets ${other}`);
+          assert.ok(!meet(r.panel, other), `${tag}: the panel ${r.panel} meets ${other}`);
+          for (const k of r.kids) assert.ok(!meet(k, other) || k[3] <= r.panel[1] || k[1] >= r.panel[3], `${tag}: ${k} meets ${other}`);
+        }
+      }
+    }
+  }
   mobile = true;
 });
 

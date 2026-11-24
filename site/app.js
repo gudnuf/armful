@@ -328,11 +328,12 @@
     document.body.classList.toggle("panelOpen", open);
     drawClear();
     for (const el of [list, filt]) for (const an of el.getAnimations({ subtree: true })) if (!(an instanceof CSSTransition)) an.finish();
-    if (!open) { list.hidden = true; filt.hidden = true; return; }
+    if (!open) { list.hidden = true; filt.hidden = true; yieldTags(); return; }
     const inEl = view === "faces" ? list : filt, outEl = view === "faces" ? filt : list;
     const swap = was.open && was.view !== view && !motion.matches;
     if (swap) { $("panel").classList.add("swap"); foldAway(outEl); } else outEl.hidden = true;
     inEl.hidden = false;
+    requestAnimationFrame(yieldTags);
     if (swap) { unfold(inEl, 90); requestAnimationFrame(() => requestAnimationFrame(() => $("panel").classList.remove("swap"))); }
   }
   // the panel's pieces that travel: the faces, or the filters' labels and rows
@@ -660,10 +661,11 @@
   // ---- the day labels: each names its day and the part of the day of the row under it ----
   function dayTag() {
     if (!nDays || !shownTiles.length) return null;
-    const y = 30; // the middle of a stuck label
+    const y = $("stats").closest("header").getBoundingClientRect().bottom + 22; // the middle of a stuck label, under the header
     let a = 0, b = shownTiles.length;
     while (a < b) { const m = (a + b) >> 1; if (shownTiles[m].getBoundingClientRect().bottom > y) b = m; else a = m + 1; }
     const top = +shownTiles[Math.min(a, shownTiles.length - 1)].dataset.n;
+    yieldTags();
     for (const sec of sections) {
       if (sec.el.hidden || !sec.tag) continue;
       if (!sec.day) { setText(sec.tag, "Undated"); continue; }
@@ -673,6 +675,17 @@
     return top;
   }
 
+  // a day label under the open panel yields (hidden, its box kept): the panel's words and faces never
+  // sit on a label. A stuck label is always clear of it (the panel stays below the header and it)
+  function yieldTags() {
+    const el = state.railOpen ? $(state.view === "faces" ? "list" : "filters") : null, p = el && !el.hidden ? el.getBoundingClientRect() : null;
+    for (const sec of sections) {
+      if (!sec.tag || sec.el.hidden) continue;
+      let y = false;
+      if (p) { const r = sec.tag.getBoundingClientRect(); y = r.left < p.right && p.left < r.right && r.top < p.bottom && p.top < r.bottom; }
+      if (sec.tag.classList.contains("yield") !== y) sec.tag.classList.toggle("yield", y);
+    }
+  }
   // ---- the day scrubber: a tick per day (its length: the day's files in the query), a thumb for
   // the screen; drag or tap to go there. It never filters ----
   const scrub = $("scrub");

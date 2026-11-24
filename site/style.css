@@ -43,6 +43,8 @@
   --face-s: 44px; --gutter: 2px;
   --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px);
   --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+  --head: calc(48px + var(--st)); /* the sticky header's height, the safe area included */
+  --under: calc(var(--head) + 44px); /* the header and a stuck day label under it: the open panel stays below both */
 }
 @supports (transition-timing-function: linear(0, 1)) { :root { --spring: 420ms linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1); } }
 @media (prefers-color-scheme: dark) {
@@ -60,7 +62,7 @@
 
 /* base type: Inter 16/24 for everything; Bricolage only for the wordmark and the one title */
 * { box-sizing: border-box; }
-html { background: var(--ground); -webkit-text-size-adjust: 100%; }
+html { background: var(--ground); -webkit-text-size-adjust: 100%; scroll-padding-top: var(--head); } /* jumps land below the header */
 body { margin: 0; color: var(--text); background: var(--ground); font: 400 16px/24px var(--sans);
   font-synthesis: none; -webkit-font-smoothing: antialiased; padding: 0 var(--sr) 0 var(--sl); } /* bottom inset: the footer's */
 p, h1 { margin: 0; }
@@ -105,7 +107,11 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 
 /* the header: the wordmark top-left and the collection's numbers beside it. It scrolls away with
    the page; its height is fixed so nothing below moves when the numbers arrive. */
-.masthead { display: flex; align-items: center; gap: 14px; height: calc(48px + var(--st)); padding: var(--st) 14px 0; }
+.masthead { display: flex; align-items: center; gap: 14px; height: var(--head); padding: var(--st) 14px 0; }
+/* it stays at the top while the wall scrolls: sticky, so it keeps its place in the flow (its height
+   is fixed from the first paint; nothing below it moves when it starts to stick). Opaque, over the
+   wall and the day labels; under the pill, the panel and the previewer */
+.masthead { position: sticky; top: 0; z-index: 8; background: var(--ground); }
 .mark { display: flex; align-items: center; min-height: 44px; color: var(--text); line-height: 0; border-radius: 4px; }
 .mark svg { width: 72px; height: auto; fill: currentColor; }
 /* the numbers sit at the right edge and follow the wall (app.js); reserved width, tabular figures */
@@ -165,8 +171,8 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 /* the rail: as wide as a face and its count, from just above the pill up to the top safe area at
    most; it scrolls inside itself */
 .list { position: fixed; left: max(8px, var(--sl)); bottom: calc(max(14px, var(--sb)) + 60px);
-  max-height: calc(100vh - max(14px, var(--sb)) - 68px - max(8px, var(--st)));
-  max-height: calc(100dvh - max(14px, var(--sb)) - 68px - max(8px, var(--st)));
+  max-height: calc(100vh - max(14px, var(--sb)) - 60px - var(--under));
+  max-height: calc(100dvh - max(14px, var(--sb)) - 60px - var(--under));
   display: flex; flex-direction: column; gap: 6px; width: max-content; padding: 6px;
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; border-radius: 28px;
   background: linear-gradient(90deg, var(--rail), transparent); }
@@ -205,8 +211,8 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
    would give, given everything else; a zero fades and takes no tap */
 .filters { position: fixed; left: max(14px, var(--sl)); bottom: calc(max(14px, var(--sb)) + 62px);
   width: min(362px, calc(100vw - 28px - var(--sl) - var(--sr)));
-  max-height: calc(100vh - max(14px, var(--sb)) - 70px - max(8px, var(--st)));
-  max-height: calc(100dvh - max(14px, var(--sb)) - 70px - max(8px, var(--st)));
+  max-height: calc(100vh - max(14px, var(--sb)) - 62px - var(--under));
+  max-height: calc(100dvh - max(14px, var(--sb)) - 62px - var(--under));
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
   display: flex; flex-direction: column; gap: 14px; padding: 14px 12px 12px; border-radius: 24px;
   background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur));
@@ -237,7 +243,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 @media (min-width: 1000px) {
   .bar { left: max(18px, var(--sl)); bottom: max(18px, var(--sb)); }
   .list { left: max(12px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 60px);
-    max-height: calc(100vh - max(18px, var(--sb)) - 72px); }
+    max-height: calc(100vh - max(18px, var(--sb)) - 60px - var(--under)); max-height: calc(100dvh - max(18px, var(--sb)) - 60px - var(--under)); }
   .masthead { padding: 0 14px 0 18px; }
   /* faces are bigger here: the count, the rings and the held pair scale with them */
   .list li { gap: 8px; }
@@ -247,7 +253,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   .pair .face { --s: 44px; min-height: 44px; }
   .pair .face.held img { box-shadow: 0 0 0 2px var(--ground); }
   .pair.tight .face + .face { margin-left: -17px; }
-  .filters { left: max(18px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 62px); max-height: calc(100vh - max(18px, var(--sb)) - 74px); }
+  .filters { left: max(18px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 62px); max-height: calc(100vh - max(18px, var(--sb)) - 62px - var(--under)); max-height: calc(100dvh - max(18px, var(--sb)) - 62px - var(--under)); }
 }
 
 /* the wall: whole photos in time order, in justified rows, full-bleed, 2px gutters; one section per
@@ -264,7 +270,8 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .rows { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--gutter); }
 /* the day's label: it lies on the day's first row, takes no height, sticks while the day scrolls
    by and is pushed out by the next one. Left-anchored, so a new word never moves it */
-.tag { position: sticky; top: max(8px, var(--st)); z-index: 3; height: 38px; margin-bottom: -38px; pointer-events: none; }
+.tag { position: sticky; top: var(--head); z-index: 3; height: 38px; margin-bottom: -38px; pointer-events: none; }
+.tag span.yield { visibility: hidden; } /* under the open panel (app.js) */
 .tag span { position: absolute; left: 8px; top: 8px; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px;
   background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur));
   font: 600 11px/16px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--text); white-space: nowrap; }
