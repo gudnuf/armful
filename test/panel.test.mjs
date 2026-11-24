@@ -152,9 +152,9 @@ test("desktop: header top-left, the pill bottom-left, the rail a narrow column a
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`), "click opens");
   const list = await rect("#list");
   assert.ok(list.bottom <= bar.top + 1, "the rail sits above the pill");
-  assert.ok(list.width <= 110, `narrow: ${list.width}`);
+  assert.ok(list.width <= 130, `narrow: ${list.width}`);
   assert.ok(same(pill, await rect("#people")), "the pill keeps its place");
-  assert.equal(await b.evalJs(`document.querySelector('#listMain .face img').getBoundingClientRect().width`), 36);
+  assert.equal(await b.evalJs(`document.querySelector('#listMain .face img').getBoundingClientRect().width`), 56);
   assert.ok(list.top >= 0 && list.bottom <= 900, "the rail fits the screen");
   // a click on the wall opens the photo and leaves the rail open
   await b.click(900, 500);

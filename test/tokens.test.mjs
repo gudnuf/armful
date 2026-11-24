@@ -66,7 +66,7 @@ test("dark tokens, painted", async () => {
 
 test("desktop face size", async () => {
   await b.load(1280, 800, false, "/example/", READY);
-  assert.equal(await prop("--face-s"), "36px");
+  assert.equal(await prop("--face-s"), "56px");
 });
 
 // last, so the log covers both themes and both viewports

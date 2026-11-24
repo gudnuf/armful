@@ -47,7 +47,7 @@
   :root { --ground: #0D0F0E; --text: #F2EFE8; --dim: rgba(242, 239, 232, .68); --ring: #FBFAF7;
     --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); --rail: rgba(13, 15, 14, .45); }
 }
-@media (min-width: 1000px) { :root { --face-s: 36px; } }
+@media (min-width: 1000px) { :root { --face-s: 56px; } }
 
 /* base type: Inter 16/24 for everything; Bricolage only for the wordmark and the one title */
 * { box-sizing: border-box; }
@@ -169,6 +169,14 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   .list { left: max(12px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 60px);
     max-height: calc(100vh - max(18px, var(--sb)) - 72px); }
   .masthead { padding: 0 18px; }
+  /* faces are bigger here: the count, the rings and the held pair scale with them */
+  .list li { gap: 8px; }
+  .count { font-size: 15px; line-height: 30px; min-width: 36px; padding: 0 9px; }
+  .face.held img, .list .face.held img { box-shadow: 0 0 0 3px var(--ground), 0 0 0 6.5px var(--ring); }
+  .face:focus-visible { outline-width: 3px; outline-offset: 4px; }
+  .pair .face { --s: 44px; min-height: 44px; }
+  .pair .face.held img { box-shadow: 0 0 0 2px var(--ground); }
+  .pair.tight .face + .face { margin-left: -17px; }
 }
 
 /* the wall: whole photos in justified rows, full-bleed, 2px gutters. app.js packs the rows
