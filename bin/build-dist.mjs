@@ -210,11 +210,29 @@ function inlineMark(siteRoot) {
 
 // The collection page's first paint: its skeleton blocks, written from the collection's own
 // data.json so that each block has exactly the box of the tile that replaces it (site/app.js lays
-// the tiles out by the same rule: the files it keeps, each tile's clamped aspect ratio to 3
-// decimals, rows of 2 / 4 / 5 whose --S is the sum of those ratios; a short last row adds 1.5 per
-// missing place and does not grow). Only numbers go in: no ids, no names.
+// the tiles out by the same rule: the files it keeps, in wall order (by capture time, the undated
+// last), one section per day of the trip, each day starting a new row; each tile's clamped aspect
+// ratio to 3 decimals, rows of 2 / 4 / 5 whose --S is the sum of those ratios; a day's short last
+// row adds 1.5 per missing place and does not grow). Only numbers go in: no ids, no names, no times.
 const SKEL_BLOCKS = 40; // fills the first screen at every width; divisible by 2, 4 and 5
 const SKEL_OPEN = '<div id="skel" class="skel" aria-hidden="true">';
+// app.js timeline(): the day of the trip of each file (04:00 to 04:00 in data.json's tz, UTC
+// without one; day 1 is the first dated day), 0 for a file without a time
+function daysOf(files, tz) {
+  const o = { timeZone: tz, year: "numeric", month: "numeric", day: "numeric", hour: "numeric", hourCycle: "h23" };
+  let fmt;
+  try { fmt = new Intl.DateTimeFormat("en-US", o); } catch { fmt = new Intl.DateTimeFormat("en-US", { ...o, timeZone: "UTC" }); }
+  const at = files.map((f) => {
+    if (typeof f.t !== "number" || !Number.isFinite(f.t)) return null;
+    try {
+      const p = {};
+      for (const x of fmt.formatToParts(new Date(f.t * 1000))) p[x.type] = x.value;
+      return Date.UTC(+p.year, +p.month - 1, +p.day) / 864e5 - (+p.hour % 24 < 4 ? 1 : 0);
+    } catch { return null; }
+  });
+  const first = Math.min(...at.filter((x) => x != null));
+  return at.map((x) => (x == null ? 0 : x - first + 1));
+}
 function skeleton(dataBuf, where) {
   let d;
   try { d = JSON.parse(dataBuf.toString("utf8")); } catch (e) { fail(`${where}: data.json is not JSON: ${e.message}`); }
@@ -222,18 +240,32 @@ function skeleton(dataBuf, where) {
   const num = (x) => typeof x === "number" && Number.isFinite(x) && x > 0;
   const ok = (f) => !!f && typeof f === "object" && typeof f.i === "string" && f.i !== "" && num(f.w) && num(f.h) && Array.isArray(f.p) &&
     (f.v == null || typeof f.v === "number" || typeof f.v === "boolean"); // app.js okFile()
-  const ars = d.files.filter(ok).slice(0, SKEL_BLOCKS).map((f) => Math.min(2.4, Math.max(0.62, f.w / f.h)).toFixed(3)); // app.js tileAr()
-  if (!ars.length) fail(`${where}: data.json has no usable files`);
-  const rows = (n) => ars.map((_, k) => {
-    const start = k - (k % n), row = ars.slice(start, start + n);
-    let S = row.reduce((a, x) => a + +x, 0);
-    // a row cut short by SKEL_BLOCKS is full on the page; only the collection's real last row is short
-    const full = row.length === n || start + n <= d.files.filter(ok).length;
-    if (!full) S += (n - row.length) * 1.5;
-    return { S: S.toFixed(3), g: full ? "" : `;--G${n}:0` };
-  });
-  const r2 = rows(2), r4 = rows(4), r5 = rows(5);
-  return ars.map((a, k) => `<i style="--ar:${a};--S2:${r2[k].S};--S4:${r4[k].S};--S5:${r5[k].S}${r2[k].g}${r4[k].g}${r5[k].g}"></i>`).join("\n");
+  const files = d.files.filter(ok);
+  if (!files.length) fail(`${where}: data.json has no usable files`);
+  const day = daysOf(files, typeof d.tz === "string" && d.tz ? d.tz : "UTC");
+  // wall order (app.js buildWall): by day, the undated last; within a day by time; ties by place
+  const seq = files.map((_, i) => i).sort((a, c) => (!day[a]) - (!day[c]) || day[a] - day[c] || (day[a] ? files[a].t - files[c].t : 0) || a - c);
+  const ar = (i) => Math.min(2.4, Math.max(0.62, files[i].w / files[i].h)).toFixed(3); // app.js tileAr()
+  const groups = []; // the days in wall order, each with all its files
+  for (const i of seq) { if (!groups.length || day[groups.at(-1)[0]] !== day[i]) groups.push([]); groups.at(-1).push(i); }
+  let left = SKEL_BLOCKS;
+  const out = [];
+  for (const g of groups) {
+    if (left <= 0) break;
+    const all = g.map(ar), m = Math.min(all.length, left); // the day's first m files get a block
+    left -= m;
+    // each block's row is the page's row (of all the day's files): its --S is that row's; the day's
+    // real last row is short (1.5 per empty place) and does not grow, nor does a row the first
+    // screen cuts (its other tiles have no block, and its blocks keep the page's boxes)
+    const rows = (n) => all.slice(0, m).map((_, k) => {
+      const start = k - (k % n), row = all.slice(start, start + n), full = row.length === n;
+      const S = row.reduce((a, x) => a + +x, 0) + (full ? 0 : (n - row.length) * 1.5);
+      return { S: S.toFixed(3), g: full && start + n <= m ? "" : `;--G${n}:0` };
+    });
+    const r2 = rows(2), r4 = rows(4), r5 = rows(5);
+    out.push("<section>\n" + all.slice(0, m).map((a, k) => `<i style="--ar:${a};--S2:${r2[k].S};--S4:${r4[k].S};--S5:${r5[k].S}${r2[k].g}${r4[k].g}${r5[k].g}"></i>`).join("\n") + "\n</section>");
+  }
+  return out.join("\n");
 }
 function withSkeleton(html, dataBuf, where) {
   const at = html.indexOf(SKEL_OPEN), end = at < 0 ? -1 : html.indexOf("</div>", at);

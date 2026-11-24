@@ -53,13 +53,19 @@ test("make-fixture writes the synthetic collection", () => {
   assert.ok(!("t" in data.files[60]), "the malformed entry is untimed too");
   for (const f of timed) assert.ok(Number.isInteger(f.t), "t is whole unix seconds");
   for (let k = 1; k < 58; k++) assert.ok(files[k].t > files[k - 1].t, "t strictly ascending");
-  // 4 days (UTC), each with a morning and an evening cluster
-  const day = (f) => new Date(f.t * 1000).toISOString().slice(0, 10);
+  // 4 trip days (a day runs 04:00 to 04:00 UTC), each with a morning and an evening cluster
+  const day = (f) => new Date((f.t - 4 * 3600) * 1000).toISOString().slice(0, 10);
   assert.equal(new Set(timed.map(day)).size, 4);
   for (const d of new Set(timed.map(day))) {
     const hours = timed.filter((f) => day(f) === d).map((f) => new Date(f.t * 1000).getUTCHours());
-    assert.ok(hours.some((h) => h < 12) && hours.some((h) => h >= 17), `${d}: morning and evening`);
+    assert.ok(hours.some((h) => h >= 4 && h < 12) && hours.some((h) => h >= 18 || h < 4), `${d}: morning and evening`);
   }
+  // past midnight is still the evening before: file 14 at 01:30, on the first trip day
+  assert.equal(new Date(files[14].t * 1000).getUTCHours(), 1);
+  assert.equal(day(files[14]), day(files[0]));
+  // one afternoon (file 36, 13:30), and a portrait video (file 26)
+  assert.deepEqual(timed.filter((f) => { const h = new Date(f.t * 1000).getUTCHours(); return h >= 12 && h < 18; }).map((f) => f.i), ["36"]);
+  assert.ok(files[26].v && files[26].h > files[26].w, "a portrait video");
   // face counts: at least as many faces as people; 0 (nobody), 1, 2-3 and 8+ (group shots) all occur
   for (const f of files) assert.ok(Number.isInteger(f.nf) && f.nf >= f.p.length, `nf of ${f.i}`);
   assert.ok(files.filter((f) => f.nf === 0).length >= 6, "6+ files without people");

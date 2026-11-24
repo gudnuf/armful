@@ -8,13 +8,17 @@ file) and OUT_DIR/fx/f{N}.svg (one per person). data.json.thumbs points the
 page at those local files instead of Drive.
 
 Shape (the page tests rely on it):
-  60 files, sizes 4:3, 3:4, 16:9, 1:1; 3 of them videos (v: 1), files 0, 22, 26;
+  60 files, sizes 4:3, 3:4, 16:9, 1:1 (file 26 is 9:16); 3 of them videos (v: 1), files
+  0, 22, 26 (26 a portrait video);
   12 people, ids 1-12, n descending (n = files containing them);
   no x (the pipeline leaves uncertain people out); people 1 and 2 share exactly 9 files;
   person 12 shares none with person 1; no bursts;
   tz "UTC"; t (unix seconds) on 58 files, strictly ascending in file order,
-  over 4 days in a morning and an evening cluster each; files 58 and 59 have
-  no t (so the file order is also the build's default order: by t, untimed last);
+  over 4 trip days (a day runs 04:00 to 04:00) in a morning and an evening
+  cluster each; file 14, the first day's last, is at 01:30 the next calendar
+  day (still the first trip day's evening); file 36 is in the third day's
+  afternoon (13:30); files 58 and 59 have no t (so the file order is also the
+  build's default order: by t, untimed last);
   nf (faces detected) >= people on the file: 0 on the 6 files with nobody
   (EMPTY), 8+ on the group shots (GROUP), otherwise 1-6.
 Then one malformed entry, appended LAST so no index above shifts: file "60",
@@ -35,6 +39,9 @@ VIDEOS = (0, 22, 26)  # the page tests rely on file 0 being a video
 EMPTY = {6, 15, 24, 33, 42, 51}  # no people, no faces
 GROUP = {10, 27, 45, 57}  # group shots: 8+ faces, most of them nobody the page names
 N_TIMED = 58  # files 58 and 59 carry no capture time
+PAST_MIDNIGHT = 14  # the first evening's last file: 01:30 the next calendar day, still trip day 1
+AFTERNOON = 36  # the third morning's last file: 13:30
+PORTRAIT_VIDEO = 26  # 9:16
 DAY0 = 1777852800  # 2026-05-04 00:00 UTC
 SESSIONS = [(d, start) for d in range(4) for start in (7 * 3600 + 1800, 18 * 3600)]  # 07:30 and 18:00
 COLOURS = ["#8A9A8E", "#A89B8C", "#7F8C99", "#9C8FA0", "#8F9F9A", "#B0A38F", "#8C8A7E", "#9AA3A8"]
@@ -79,7 +86,7 @@ def main(out_dir):
 
     files = []
     for i in idxs:
-        w, h = SIZES[i % len(SIZES)]
+        w, h = (1080, 1920) if i == PORTRAIT_VIDEO else SIZES[i % len(SIZES)]
         rec = dict(i=str(i), w=w, h=h, p=sorted(pid for pid, m in members.items() if i in m))
         if i in videos:
             rec["v"] = 1
@@ -88,6 +95,10 @@ def main(out_dir):
             j = i - next(k for k in range(N_TIMED) if k * len(SESSIONS) // N_TIMED == s)  # place in session
             day, start = SESSIONS[s]
             rec["t"] = DAY0 + day * 86400 + start + j * 360 + (i % 3) * 40
+            if i == PAST_MIDNIGHT:
+                rec["t"] = DAY0 + (day + 1) * 86400 + 5400  # 01:30
+            elif i == AFTERNOON:
+                rec["t"] = DAY0 + day * 86400 + 13 * 3600 + 1800  # 13:30
         n = len(rec["p"])
         rec["nf"] = 0 if i in EMPTY else 8 + i % 5 if i in GROUP else n + (1 if i % 7 == 3 or n == 0 else 0)
         files.append(rec)

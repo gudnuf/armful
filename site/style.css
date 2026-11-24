@@ -33,6 +33,7 @@
   --ground: #FBFAF7; --text: #16231F; --dim: #4A5754; --ring: #16231F; --line: rgba(22, 35, 31, .12);
   --veil: rgba(255, 255, 255, .75); --veil-blur: 20px; --rail: rgba(251, 250, 247, .5);
   --tile: #F2EFE8; /* an empty photo box, and the skeleton's blocks: cream on paper, a deep grey on the dark ground */
+  --chip: rgba(22, 35, 31, .05); /* the resting fill of a filter option */
   --display: "Bricolage Grotesque", "Bricolage Fallback", "Inter", ui-sans-serif, system-ui, sans-serif;
   --sans: "Inter", "Inter Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* motion: --spring for anything that moves, --fade for opacity, --press for a tapped face (120ms) */
@@ -46,7 +47,8 @@
 @supports (transition-timing-function: linear(0, 1)) { :root { --spring: 420ms linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1); } }
 @media (prefers-color-scheme: dark) {
   :root { --ground: #0D0F0E; --text: #F2EFE8; --dim: rgba(242, 239, 232, .68); --ring: #FBFAF7;
-    --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); --rail: rgba(13, 15, 14, .45); --tile: #1D2220; }
+    --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); --rail: rgba(13, 15, 14, .45); --tile: #1D2220;
+    --chip: rgba(242, 239, 232, .07); }
 }
 @media (min-width: 1000px) { :root { --face-s: 56px; } }
 
@@ -113,32 +115,44 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .st + .st { margin-left: 12px; }
 .st svg { width: 11px; height: 11px; fill: currentColor; opacity: .7; flex: none; }
 
-/* the people: one compact pill bottom-left (every width), without words. Nobody held: three faces
-   and a chevron. Someone held: their faces, a chevron and ×. The pill opens a narrow rail of faces up
-   the left edge, barely veiled; the wall stays visible beside it and keeps scrolling and taking
-   taps. The pill never moves. */
+/* the people and the filters: one compact pill bottom-left (every width). Nobody held: three faces,
+   the filter icon and a chevron. Someone held: their faces instead of the three. Anything chosen: a
+   short line of the filter words beside the icon, and × (clear everything). The pill opens one of two
+   views above itself: a narrow rail of faces up the left edge, barely veiled, or the filters card;
+   the filter icon swaps between them. The wall stays visible beside them and keeps scrolling and
+   taking taps. The pill never moves. */
 .panel { position: fixed; z-index: 10; left: 0; bottom: 0; width: 0; height: 0; }
 .bar { position: fixed; left: max(14px, var(--sl)); bottom: max(14px, var(--sb)); display: flex; align-items: center;
   gap: 2px; padding: 4px; max-width: calc(100vw - 28px - var(--sl) - var(--sr)); border-radius: 999px;
   background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur));
   box-shadow: 0 4px 16px rgba(22, 35, 31, .16); }
 .pill { all: unset; box-sizing: border-box; touch-action: manipulation; -webkit-tap-highlight-color: transparent; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px 0 4px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 6px 0 4px; border-radius: 999px;
   font: 600 11px/16px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--text); white-space: nowrap;
   font-variant-numeric: tabular-nums; transition: transform var(--press-t) ease-out, background var(--fade), color var(--fade); }
 .pill:active { transform: scale(var(--press)); }
 .pill:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 2px; }
-.bar.held #people { padding: 0 13px; } /* the chevron alone: still a 44px target */
-.bar.held .stack { display: none; }
+.bar.held #people { display: none; } /* the held faces stand in for the three */
 .stack { display: flex; flex: none; }
 .stack img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; background: var(--cream); box-shadow: 0 0 0 2px var(--ground); }
 .stack img + img, .stack .sk + .sk { margin-left: -10px; }
 .stack .sk { display: block; width: 30px; height: 30px; border-radius: 50%; background: var(--cream); box-shadow: 0 0 0 2px var(--ground); }
 .chev { display: grid; transition: transform var(--spring); }
 .chev svg { width: 18px; height: 18px; }
-/* the rail opens upward: the chevron points the way it will go */
-#people .chev { transform: rotate(180deg); }
-#people[aria-expanded="true"] .chev { transform: none; }
+/* the chevron: its own target (open / fold); the panel opens upward, the chevron points the way it will go */
+.chevb { all: unset; box-sizing: border-box; cursor: pointer; display: grid; place-items: center; width: 36px; min-height: 44px; border-radius: 999px;
+  color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent; position: relative; flex: none; }
+.chevb::after { content: ""; position: absolute; inset: 0 -4px; } /* 44px of target without 44px of pill */
+.chevb:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
+.chevb .chev { transform: rotate(180deg); }
+.chevb[aria-expanded="true"] .chev { transform: none; }
+/* the view on screen: its button sits on a quiet disc */
+.bar .pill[aria-expanded="true"] { background: var(--line); }
+/* the filter icon, and the words of what is chosen (truncated; the panel spells them out) */
+.fbtn { flex: 0 1 auto; min-width: 44px; justify-content: center; padding: 0 12px; gap: 6px; overflow: hidden;
+  font: 600 13px/20px var(--sans); letter-spacing: 0; text-transform: none; }
+.fbtn .fi { width: 20px; height: 20px; flex: none; }
+.terms { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the rail: as wide as a face and its count, from just above the pill up to the top safe area at
    most; it scrolls inside itself */
 .list { position: fixed; left: max(8px, var(--sl)); bottom: calc(max(14px, var(--sb)) + 60px);
@@ -148,11 +162,11 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; border-radius: 28px;
   background: linear-gradient(90deg, var(--rail), transparent); }
 .list::-webkit-scrollbar { display: none; }
-/* the rail rises in on the spring as it opens (a CSS entry transition, not a view transition:
-   during one the browser sends every tap to the root, and the wall beside the rail must stay live);
-   it folds at once */
-.list { transition: transform var(--spring), opacity var(--fade); }
-@starting-style { .list { transform: translateY(18px); opacity: 0; } }
+/* the rail (and the filters card) rises in on the spring as it opens (a CSS entry transition, not a
+   view transition: during one the browser sends every tap to the root, and the wall beside the rail
+   must stay live); it folds at once. Swapping between the two is app.js's: one fold, one unfold */
+.list, .filters { transition: transform var(--spring), opacity var(--fade); }
+@starting-style { .panel:not(.swap) .list, .panel:not(.swap) .filters { transform: translateY(18px); opacity: 0; } }
 .list ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .list li { display: flex; align-items: center; gap: 6px; }
 .list .face img { box-shadow: 0 1px 4px rgba(13, 15, 14, .28); }
@@ -178,6 +192,37 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 /* a tapped face on its way into the pill */
 .arc { position: fixed; z-index: 40; margin: 0; border-radius: 50%; object-fit: cover; pointer-events: none; transform-origin: 0 0;
   background-color: var(--cream); background-repeat: no-repeat; }
+/* the filters: a veiled card where the rail is, three rows; each option says the files tapping it
+   would give, given everything else; a zero fades and takes no tap */
+.filters { position: fixed; left: max(14px, var(--sl)); bottom: calc(max(14px, var(--sb)) + 62px);
+  width: min(362px, calc(100vw - 28px - var(--sl) - var(--sr)));
+  max-height: calc(100vh - max(14px, var(--sb)) - 70px - max(8px, var(--st)));
+  max-height: calc(100dvh - max(14px, var(--sb)) - 70px - max(8px, var(--st)));
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+  display: flex; flex-direction: column; gap: 14px; padding: 14px 12px 12px; border-radius: 24px;
+  background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur));
+  box-shadow: 0 4px 16px rgba(22, 35, 31, .16); }
+.filters::-webkit-scrollbar { display: none; }
+.frow { display: flex; flex-direction: column; gap: 6px; }
+.frow > .lbl { padding: 0 4px 2px; }
+.opts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+.opts.days { grid-auto-flow: row; grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr)); }
+.opt { all: unset; box-sizing: border-box; position: relative; min-height: 48px; padding: 4px 2px; border-radius: 14px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  background: var(--chip); color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  transition: box-shadow var(--fade), opacity var(--fade), transform var(--press-t) ease-out, background var(--fade); }
+.opt .v { display: inline-flex; align-items: center; gap: 4px; font: 600 14px/20px var(--sans); white-space: nowrap; }
+.opt .v svg { width: 16px; height: 16px; }
+.opt .c { font: 500 11px/14px var(--sans); font-variant-numeric: tabular-nums; color: var(--dim); }
+.opt[aria-pressed="true"] { box-shadow: inset 0 0 0 2.5px var(--ring); background: transparent; }
+.opt[aria-pressed="true"] .c { color: var(--text); }
+.opt.zero { opacity: .3; cursor: default; }
+.opt:active:not(.zero) { transform: scale(var(--press)); }
+.opt:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 2px; }
+/* morning / afternoon / evening: there once a day is picked, unfolding on the spring */
+.partsWrap { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--spring), opacity var(--fade); }
+.partsWrap.on { grid-template-rows: 1fr; opacity: 1; }
+.partsWrap > div { min-height: 0; overflow: hidden; }
 #empty p { color: var(--text); }
 #empty .pill { min-height: 36px; padding: 0 14px; color: var(--dim); box-shadow: inset 0 0 0 1px var(--line); }
 @media (min-width: 1000px) {
@@ -193,16 +238,42 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   .pair .face { --s: 44px; min-height: 44px; }
   .pair .face.held img { box-shadow: 0 0 0 2px var(--ground); }
   .pair.tight .face + .face { margin-left: -17px; }
+  .filters { left: max(18px, var(--sl)); bottom: calc(max(18px, var(--sb)) + 62px); max-height: calc(100vh - max(18px, var(--sb)) - 74px); }
 }
 
-/* the wall: whole photos in justified rows, full-bleed, 2px gutters. app.js packs the rows
-   (2 across on a phone, 4 from 1000px, 5 from 1600px) and gives each tile its row's --S (sum of
-   the row's aspect ratios) and --n (tiles in a row); width follows from the wall's width, height
-   from aspect-ratio, so every box is reserved before any image arrives. A row of panoramas on a
-   phone would be thinner than 100px: min-height holds it there and the photos crop a little. */
+/* the wall: whole photos in time order, in justified rows, full-bleed, 2px gutters; one section per
+   day of the trip (and one for files without a time, last), each starting a new row. app.js packs
+   each day's rows (2 across on a phone, 4 from 1000px, 5 from 1600px) and gives each tile its row's
+   --S (sum of the row's aspect ratios) and --n (tiles in a row); width follows from the wall's
+   width, height from aspect-ratio, so every box is reserved before any image arrives. A row of
+   panoramas on a phone would be thinner than 100px: min-height holds it there and the photos crop a
+   little. */
 /* Safari < 16 has no container units: the viewport width less a little slack (flex-grow, by aspect
    ratio, hands the slack back in proportion, so rows still reach the edge and keep one height) */
-.wall { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--gutter); container-type: inline-size; }
+.wall { container-type: inline-size; }
+.day { position: relative; margin-bottom: var(--gutter); }
+.rows { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--gutter); }
+/* the day's label: it lies on the day's first row, takes no height, sticks while the day scrolls
+   by and is pushed out by the next one. Left-anchored, so a new word never moves it */
+.tag { position: sticky; top: max(8px, var(--st)); z-index: 3; height: 38px; margin-bottom: -38px; pointer-events: none; }
+.tag span { position: absolute; left: 8px; top: 8px; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px;
+  background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur));
+  font: 600 11px/16px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--text); white-space: nowrap; }
+/* the day scrubber: a hairline up the right edge, a tick per day (its length: that day's files in
+   the current filter) and a thumb for where the screen is. It fades in while the wall moves and out
+   1.2s after; only then does it take touches. Everything in it moves by transform */
+.scrub { position: fixed; z-index: 9; right: max(0px, var(--sr)); top: calc(max(8px, var(--st)) + 48px); bottom: calc(max(14px, var(--sb)) + 64px);
+  width: 44px; opacity: 0; pointer-events: none; transition: opacity var(--fade); touch-action: none; cursor: ns-resize; }
+.scrub.on { opacity: 1; pointer-events: auto; }
+body.lbOpen .scrub { visibility: hidden; }
+.scrub .track { position: absolute; right: 8px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: var(--line); }
+.scrub .tk { position: absolute; top: 0; right: 8px; width: 16px; height: 2px; border-radius: 1px; background: var(--text); opacity: .55; transform-origin: 100% 50%; }
+.scrub .thumb { position: absolute; top: 0; right: 6px; width: 6px; height: 20px; border-radius: 3px; background: var(--text); transform-origin: 50% 0; will-change: transform; }
+/* fixed width: a longer day name never moves its edge */
+.scrub .bubble { position: absolute; top: 0; right: 26px; width: 188px; height: 28px; padding: 6px 12px; border-radius: 999px; white-space: nowrap; text-align: center;
+  background: var(--veil); -webkit-backdrop-filter: blur(var(--veil-blur)); backdrop-filter: blur(var(--veil-blur)); color: var(--text);
+  box-shadow: 0 4px 16px rgba(22, 35, 31, .16); opacity: 0; transition: opacity var(--fade); pointer-events: none; }
+.scrub.drag .bubble { opacity: 1; }
 .tile { --n: 2; --S: 3; --g: 1; position: relative; display: block; box-sizing: border-box; overflow: hidden;
   /* 1px of slack keeps rounding from wrapping a row; flex-grow (by aspect ratio) takes it back */
   flex: calc(var(--ar) * var(--g)) 0 calc((100cqw - (var(--n) - 1) * var(--gutter) - 1px) * var(--ar) / var(--S));
@@ -233,8 +304,8 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
    The build (bin/build-dist.mjs) writes each collection's blocks from its own data.json, so every
    block has exactly the box of the tile that replaces it: nothing moves when the data arrives.
    They breathe a little; under reduced motion they hold still. */
-.skel { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: flex-start; gap: var(--gutter); container-type: inline-size;
-  height: calc(100vh - 48px - var(--st)); height: calc(100dvh - 48px - var(--st)); overflow: hidden; }
+.skel { container-type: inline-size; height: calc(100vh - 48px - var(--st)); height: calc(100dvh - 48px - var(--st)); overflow: hidden; }
+.skel section { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--gutter); margin-bottom: var(--gutter); }
 .skel i { --n: 2; --S: var(--S2); --g: var(--G2, 1); flex: calc(var(--ar) * var(--g)) 0 calc((100cqw - (var(--n) - 1) * var(--gutter) - 1px) * var(--ar) / var(--S));
   aspect-ratio: var(--ar); min-width: 0; min-height: 100px; background: var(--tile); }
 @supports not (width: 1cqw) {
@@ -319,8 +390,9 @@ body.lbOpen { overflow: hidden; }
 #lbDrive { position: absolute; right: 0; top: 54px; } /* wide screens: download sits under close, clear of the photo */
 /* the held faces, small at the bottom centre */
 .lbHold { position: absolute; left: 50%; bottom: calc(max(18px, var(--sb)) + 4px); transform: translateX(-50%);
-  display: flex; align-items: center; gap: 10px; pointer-events: none; }
+  display: flex; align-items: center; gap: 10px; pointer-events: none; white-space: nowrap; max-width: calc(100vw - 136px); }
 .lbHold[hidden] { display: none; }
+#lbLine { overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 6px rgba(13, 15, 14, .6); }
 .lbHold .face { --s: 36px; cursor: default; }
 .lbHold .face.held img { box-shadow: 0 0 0 2px var(--ground), 0 0 0 3.5px var(--paper); }
 .lbHold .pair.tight .face + .face { margin-left: -14px; }

@@ -124,19 +124,32 @@ test("the collection page references only hashed or shipped files", () => {
 
 test("the collection's skeleton is written from its own data: one block per tile on the first screen, numbers only", () => {
   const html = read("example/index.html");
-  const blocks = [...html.match(/<div id="skel" class="skel" aria-hidden="true">([\s\S]*?)<\/div>/)[1].matchAll(/<i style="([^"]*)"><\/i>/g)].map((m) => m[1]);
+  const skel = html.match(/<div id="skel" class="skel" aria-hidden="true">([\s\S]*?)<\/div>/)[1];
+  // one section per day of the trip, in order, each holding that day's blocks
+  const secs = [...skel.matchAll(/<section>([\s\S]*?)<\/section>/g)].map((m) => [...m[1].matchAll(/<i style="([^"]*)"><\/i>/g)].map((x) => x[1]));
+  assert.equal(skel.replace(/<section>[\s\S]*?<\/section>/g, "").trim(), "", "nothing but sections");
   const files = JSON.parse(readFileSync(join(WS, "fixture", "data.json"), "utf8")).files
     .filter((f) => f && typeof f.i === "string" && f.i && f.w > 0 && f.h > 0 && Array.isArray(f.p));
-  assert.equal(blocks.length, Math.min(40, files.length));
+  assert.equal(secs.flat().length, Math.min(40, files.length));
+  // the fixture's files are in wall order already; a trip day runs 04:00 to 04:00 (tz UTC)
+  const day = (f) => ("t" in f ? new Date((f.t - 4 * 3600) * 1000).toISOString().slice(0, 10) : "undated");
+  const days = [];
+  for (const f of files) { if (!days.length || day(days.at(-1)[0]) !== day(f)) days.push([]); days.at(-1).push(f); }
+  assert.deepEqual(secs.map((s) => s.length), days.map((d) => d.length).reduce((out, n) => {
+    const left = 40 - out.reduce((a, x) => a + x, 0); if (left > 0) out.push(Math.min(n, left)); return out; }, []), "blocks per day");
   const ar = (f) => Math.min(2.4, Math.max(0.62, f.w / f.h)).toFixed(3);
-  blocks.forEach((st, k) => {
+  secs.forEach((blocks, d) => blocks.forEach((st, k) => {
     assert.match(st, /^--ar:[\d.]+;--S2:[\d.]+;--S4:[\d.]+;--S5:[\d.]+(;--G[245]:0)*$/, st);
-    assert.equal(st.match(/--ar:([\d.]+)/)[1], ar(files[k]), `block ${k}`);
+    assert.equal(st.match(/--ar:([\d.]+)/)[1], ar(days[d][k]), `day ${d + 1} block ${k}`);
     for (const n of [2, 4, 5]) {
-      const row = files.slice(k - (k % n), k - (k % n) + n).map(ar);
-      assert.equal(st.match(new RegExp(`--S${n}:([\\d.]+)`))[1], row.reduce((a, x) => a + +x, 0).toFixed(3), `block ${k}, ${n} across`);
+      // rows are packed inside each day; the day's real last row is short: 1.5 per empty place, no growing
+      // (a row the first screen cuts keeps the page's --S and does not grow either)
+      const row = days[d].slice(k - (k % n), k - (k % n) + n).map(ar), short = row.length < n, cut = k - (k % n) + n > blocks.length;
+      const S = row.reduce((a, x) => a + +x, 0) + (short ? (n - row.length) * 1.5 : 0);
+      assert.equal(st.match(new RegExp(`--S${n}:([\\d.]+)`))[1], S.toFixed(3), `day ${d + 1} block ${k}, ${n} across`);
+      assert.equal(st.includes(`--G${n}:0`), short || cut, `day ${d + 1} block ${k}, ${n} across: grows`);
     }
-  });
+  }));
 });
 
 test("reference rewriting: whole attribute values, any quoting, query and fragment kept", () => {

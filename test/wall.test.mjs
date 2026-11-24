@@ -21,10 +21,17 @@ const READY = `document.querySelectorAll('#wall .tile').length === 60 && documen
 // visible tiles grouped into rows by their top edge (layout boxes, not mid-animation)
 const ROWS = `(() => { const rows = new Map();
   for (const t of document.querySelectorAll('#wall .tile')) { if (t.hidden) continue;
-    const r = t.getBoundingClientRect(), k = Math.round(t.offsetTop);
+    const r = t.getBoundingClientRect(), k = Math.round(r.top + scrollY);
     if (!rows.has(k)) rows.set(k, []); rows.get(k).push({ n: +t.dataset.n, w: r.width, h: r.height, left: r.left, right: r.right }); }
   return [...rows.values()]; })()`;
 const LENS = `JSON.stringify(${ROWS}.map((r) => r.length))`;
+// the fixture's trip days (04:00 to 04:00 UTC), in files: 4 days, then the 2 undated files
+const DAYS = [15, 14, 15, 14, 2];
+// each day packs its own rows of n: full rows, then the day's short last row
+// the same for the files with keep(i) (fixture files are in wall order)
+const packedIf = (n, keep) => packed(n, DAYS.map((m, d) => { const at = DAYS.slice(0, d).reduce((a, x) => a + x, 0);
+  return Array.from({ length: m }, (_, k) => at + k).filter(keep).length; }).filter((m) => m > 0));
+const packed = (n, days = DAYS) => days.flatMap((m) => Array.from({ length: Math.ceil(m / n) }, (_, k) => Math.min(n, m - k * n)));
 const WALL_H = `document.getElementById('wall').getBoundingClientRect().height`;
 const BUCKET = (px) => [400, 600, 800, 1000, 1200].find((z) => z >= px) || 1200;
 const dirs = [];
@@ -63,17 +70,21 @@ after(async () => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
-test("phone: 60 tiles, exactly 2 per row, rows at least 100px, 2px gutters", async () => {
+test("phone: 60 tiles in time order, a section per day, 2 per row, rows at least 100px, 2px gutters", async () => {
   await b.load(390, 844, true, url(srv), READY);
-  assert.equal(await b.evalJs(`document.querySelectorAll('#wall > a.tile').length`), 60);
-  assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('wall')).gap`), "2px");
+  assert.equal(await b.evalJs(`document.querySelectorAll('#wall > section.day > .rows > a.tile').length`), 60);
+  assert.deepEqual(await b.evalJs(`[...document.querySelectorAll('#wall > .day')].map((s) => [s.dataset.day, s.querySelectorAll('.tile').length])`),
+    [["1", 15], ["2", 14], ["3", 15], ["4", 14], ["0", 2]], "four days, then the undated");
+  assert.deepEqual(await b.evalJs(`[...document.querySelectorAll('#wall .tile')].map((t) => +t.dataset.n)`), Array.from({ length: 60 }, (_, i) => i), "time order");
+  assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#wall .rows')).gap`), "2px");
   const rows = await b.evalJs(ROWS);
-  assert.equal(rows.length, 30);
+  assert.deepEqual(rows.map((r) => r.length), packed(2));
   for (const [k, r] of rows.entries()) {
-    assert.equal(r.length, 2, `row ${k} has ${r.length} tiles`);
     assert.ok(r[0].h >= 100, `row ${k} is ${r[0].h}px tall`);
+    assert.ok(Math.abs(r[0].left) < 1, `row ${k} starts at the edge`);
+    if (r.length < 2) continue; // a day's short last row: ragged
     assert.ok(Math.abs(r[0].h - r[1].h) < 1, `row ${k}: tiles share a height`);
-    assert.ok(Math.abs(r[0].left) < 1 && Math.abs(r[1].right - 390) < 1, `row ${k} spans the screen`);
+    assert.ok(Math.abs(r[1].right - 390) < 1, `row ${k} spans the screen`);
   }
   // a row of two panoramas (2.4 + 2.4) would be 81px: it holds at 100px, still two across
   const pano = await b.evalJs(`(() => { const [a, c] = armful.tiles; a.style.setProperty('--ar', '2.400'); c.style.setProperty('--ar', '2.400');
@@ -87,7 +98,7 @@ test("rows re-pack in place across 999/1000 and 1599/1600", async () => {
   await b.load(999, 900, false, url(srv), READY);
   for (const [w, n] of [[999, 2], [1000, 4], [1599, 4], [1600, 5], [1440, 4], [390, 2]]) {
     await resize(w, 900, false);
-    const want = JSON.stringify(Array.from({ length: Math.ceil(60 / n) }, (_, k) => Math.min(n, 60 - k * n)));
+    const want = JSON.stringify(packed(n));
     assert.ok(await b.until(`${LENS} === ${JSON.stringify(want)}`, 3000), `${w}: rows of ${n}, got ${await b.evalJs(LENS)}`);
     const rows = await b.evalJs(ROWS);
     for (const [k, r] of rows.entries()) {
@@ -350,10 +361,8 @@ test("after load: no loading state, footer reachable, the clicked file opens eve
   await b.evalJs(`armful.setShown(armful.tiles.map((_, i) => i % 3 === 0))`);
   assert.equal(await b.evalJs(`armful.tiles.some((t) => t.getAnimations().length > 0)`), true, "tiles travel");
   assert.ok(await b.until(`document.getAnimations().filter((a) => a.effect?.target?.classList?.contains('tile')).length === 0`, 2000), "FLIP settles");
-  const rows = await b.evalJs(ROWS);
-  assert.equal(rows.length, 10);
-  for (const r of rows) assert.equal(r.length, 2);
-  await b.evalJs(`armful.tiles[9].click()`); // second row, first tile after the filter
+  assert.deepEqual((await b.evalJs(ROWS)).map((r) => r.length), packedIf(2, (i) => i % 3 === 0), "each day packs its own rows");
+  await b.evalJs(`armful.tiles[9].click()`); // the fourth file the filter shows
   assert.match(await b.evalJs(`document.getElementById('lbDrive').href`), /\/file\/d\/9\/view$/);
   assert.equal(await b.evalJs(`document.getElementById('lbCount').textContent`), "4 / 20");
   await b.key("Escape", 27);
@@ -383,7 +392,7 @@ test("reduced motion: setShown snaps, nothing animates", async () => {
     assert.equal(await b.evalJs(`armful.tiles.every((t) => !t.style.transform && !t.style.opacity)`), true);
     assert.equal(await b.evalJs(`armful.tiles.filter((t) => !t.hidden).length`), 30);
     assert.equal(await b.evalJs(`getComputedStyle(armful.tiles[0]).transitionDuration`), "0s");
-    assert.deepEqual((await b.evalJs(ROWS)).map((r) => r.length), Array(15).fill(2));
+    assert.deepEqual((await b.evalJs(ROWS)).map((r) => r.length), packedIf(2, (i) => i % 2 === 0));
   } finally { await light(); }
 });
 

@@ -33,6 +33,9 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M9 7l8 5-8 5z" fill="currentColor"/></symbol>
   <symbol id="i-prev" viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
   <symbol id="i-next" viewBox="0 0 24 24"><path d="M9.5 5.5L16 12l-6.5 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M4.5 6h15l-5.8 6.9v4.6l-3.4 1.7v-6.3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-port" viewBox="0 0 24 24"><rect x="7.5" y="4.5" width="9" height="15" rx="1.6" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
+  <symbol id="i-land" viewBox="0 0 24 24"><rect x="3.5" y="7" width="17" height="10" rx="1.6" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v10m-4.5-4.5L12 15l4.5-4.5M6 19h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
 </svg>
 
@@ -41,18 +44,27 @@
   <p id="stats" class="lbl stats" role="img"></p>
 </header>
 
-<aside id="panel" class="panel" aria-label="People" inert>
+<aside id="panel" class="panel" aria-label="People and filters" inert>
   <div id="list" class="list" hidden><ol id="listMain"></ol></div>
+  <div id="filters" class="filters" role="group" aria-label="Filters" hidden>
+    <section class="frow"><p class="lbl" id="lblN">People in the photo</p><div class="opts" id="optN" role="group" aria-labelledby="lblN"></div></section>
+    <section class="frow" id="rowD"><p class="lbl" id="lblD">Day of the trip</p><div class="opts days" id="optD" role="group" aria-labelledby="lblD"></div>
+      <div id="partsWrap" class="partsWrap" inert><div><div class="opts" id="optP" role="group" aria-label="Part of the day"></div></div></div></section>
+    <section class="frow"><p class="lbl" id="lblM">Media</p><div class="opts" id="optM" role="group" aria-labelledby="lblM"></div><div class="opts" id="optS" role="group" aria-label="Shape"></div></section>
+  </div>
   <div id="bar" class="bar">
     <button id="pair" class="pair tight" type="button" hidden></button>
-    <button id="people" class="pill" aria-expanded="false" aria-controls="list"><span class="stack" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i></span><span id="peopleLabel" class="sr" aria-live="polite"></span><span class="chev" aria-hidden="true"><svg><use href="#i-chev"/></svg></span></button>
-    <button id="clear" class="x" type="button" aria-label="Clear" hidden><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+    <button id="people" class="pill" type="button" aria-expanded="false" aria-controls="list"><span class="stack" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i></span><span id="peopleLabel" class="sr" aria-live="polite"></span></button>
+    <button id="fbtn" class="pill fbtn" type="button" aria-expanded="false" aria-controls="filters" aria-label="Filters"><svg class="fi" aria-hidden="true"><use href="#i-funnel"/></svg><span id="terms" class="terms" hidden></span></button>
+    <button id="chev" class="chevb" type="button" aria-expanded="false" aria-label="Open"><span class="chev" aria-hidden="true"><svg><use href="#i-chev"/></svg></span></button>
+    <button id="clear" class="x" type="button" aria-label="Clear everything" hidden><svg aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
 </aside>
 
 <main id="wall" class="wall" aria-label="Photos"></main>
 <!-- the first paint: a wall of cream blocks the real tiles grow out of when the data arrives -->
 <div id="skel" class="skel" aria-hidden="true">
+<section>
 <i style="--ar:1.5;--S2:2.167;--S4:5.000;--S5:5.750"></i>
 <i style="--ar:0.667;--S2:2.167;--S4:5.000;--S5:5.750"></i>
 <i style="--ar:1.333;--S2:2.833;--S4:5.000;--S5:5.750"></i>
@@ -93,6 +105,7 @@
 <i style="--ar:1.5;--S2:3.278;--S4:5.278;--S5:6.778"></i>
 <i style="--ar:0.667;--S2:2.000;--S4:5.278;--S5:6.778"></i>
 <i style="--ar:1.333;--S2:2.000;--S4:5.278;--S5:6.778"></i>
+</section>
 </div>
 <div id="loading" class="state" role="status">
   <p class="sr">Loading</p>
@@ -103,6 +116,9 @@
     <circle class="top" cx="256" cy="130.9" r="67.8"/>
   </svg></template>
 <div id="empty" class="state" hidden><p>No photos</p><button class="pill quiet" type="button" hidden>clear</button></div>
+<!-- the day scrubber: a hairline up the right edge, a tick per day; it fades in while the wall moves.
+     It navigates, never filters -->
+<div id="scrub" class="scrub" aria-hidden="true"><div class="track"></div><div id="ticks"></div><i id="thumb" class="thumb"></i><span id="bubble" class="bubble lbl"></span></div>
 
 <footer inert>
   <p>Want your face removed? Write to <a href="mailto:photos@armful.photos">photos@armful.photos</a></p>
@@ -111,7 +127,7 @@
   <div id="lbStage" class="lbStage"></div>
   <button id="lbPrev" class="icon lbNav lbPrev" title="Previous" aria-label="Previous"><svg aria-hidden="true"><use href="#i-prev"/></svg></button>
   <button id="lbNext" class="icon lbNav lbNext" title="Next" aria-label="Next"><svg aria-hidden="true"><use href="#i-next"/></svg></button>
-  <div id="lbHold" class="lbHold" hidden><span id="lbPair" class="pair tight"></span></div>
+  <div id="lbHold" class="lbHold" hidden><span id="lbPair" class="pair tight"></span><span id="lbLine" class="lbl light"></span></div>
   <div class="lbTop">
     <p id="lbCount" class="lbCount lbl light" aria-live="polite"></p>
     <a id="lbDrive" class="icon" target="_blank" rel="noopener noreferrer" title="Original in Google Drive" aria-label="Original in Google Drive"><svg aria-hidden="true"><use href="#i-down"/></svg></a>
