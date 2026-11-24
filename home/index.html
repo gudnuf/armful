@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#FBFAF7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0D0F0E" media="(prefers-color-scheme: dark)">
+<title>armful — armfuls of photos, finally findable</title>
+<meta name="description" content="Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them. Open source.">
+<link rel="canonical" href="https://armful.photos/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="armful">
+<meta property="og:title" content="armful">
+<meta property="og:description" content="Armfuls of photos, finally findable. Find your friends in the group's photos. Open source.">
+<meta property="og:url" content="https://armful.photos/">
+<meta property="og:image" content="https://armful.photos/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The armful wordmark on paper, with the line: Armfuls of photos, finally findable.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="armful">
+<meta name="twitter:description" content="Armfuls of photos, finally findable. Find your friends in the group's photos. Open source.">
+<meta name="twitter:image" content="https://armful.photos/static/og.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/home.css">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "WebApplication", "name": "armful", "url": "https://armful.photos/",
+ "description": "Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them. Open source.",
+ "applicationCategory": "PhotographyApplication", "operatingSystem": "Web", "isAccessibleForFree": true,
+ "license": "https://opensource.org/licenses/MIT", "sameAs": ["https://github.com/gudnuf/armful"]}
+</script>
+</head>
+<body class="home">
+<main>
+  <h1><!-- mark --></h1>
+  <p class="title">Armfuls of photos, finally findable.</p>
+  <p class="lede">Everyone's photos from the trip, the training, the weekend, in one place, searchable by who's in them. Open source.</p>
+</main>
+<footer><a class="lbl" href="https://github.com/gudnuf/armful">GitHub</a></footer>
+<script>
+/* Recent armfuls: collections this browser opened, drawn only when there are some.
+   The shared shape (the collection page writes it, this page only reads it):
+     localStorage["armful:recent"] = JSON array, newest first, at most 6, one per slug:
+       { slug: "<collection slug, ^[a-z0-9-]{6,}$, not reserved>",
+         title: "<plain text, 1-80 chars>",
+         door: "<door photo Drive id, ^[A-Za-z0-9_-]{10,200}$>" or null,
+         t: <ms since the epoch, when it was last opened> }
+   Anything that does not match is skipped. Nothing here is ever sent anywhere. */
+(function () {
+  try {
+    var list = JSON.parse(localStorage.getItem("armful:recent") || "[]");
+    if (!Array.isArray(list)) return;
+    var SLUG = /^[a-z0-9-]{6,}$/, DOOR = /^[A-Za-z0-9_-]{10,200}$/, seen = {}, ok = [];
+    var RESERVED = ["app", "api", "a", "c", "about", "login", "new", "open", "static", "_"];
+    for (var i = 0; i < list.length && ok.length < 6; i++) {
+      var r = list[i];
+      if (!r || typeof r !== "object") continue;
+      if (typeof r.slug !== "string" || !SLUG.test(r.slug) || RESERVED.indexOf(r.slug) >= 0 || seen[r.slug]) continue;
+      if (typeof r.title !== "string" || !r.title.trim() || r.title.length > 80) continue;
+      if (r.door != null && (typeof r.door !== "string" || !DOOR.test(r.door))) continue;
+      if (r.t != null && (typeof r.t !== "number" || !isFinite(r.t))) continue;
+      seen[r.slug] = 1;
+      ok.push({ slug: r.slug, title: r.title.trim(), door: r.door || null });
+    }
+    if (!ok.length) return;
+    var sec = document.createElement("section"), lbl = document.createElement("p"), ul = document.createElement("ul");
+    sec.className = "recent"; sec.setAttribute("aria-labelledby", "recent-lbl");
+    lbl.className = "lbl"; lbl.id = "recent-lbl"; lbl.textContent = "Recent";
+    ul.className = "cards";
+    ok.forEach(function (c) {
+      var li = document.createElement("li"), a = document.createElement("a"), box = document.createElement("span"), t = document.createElement("span");
+      a.className = "card"; a.href = "/" + c.slug + "/";
+      box.className = "thumb";
+      if (c.door) {
+        var img = document.createElement("img");
+        img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
+        img.addEventListener("load", function () { img.className = "in"; });
+        img.addEventListener("error", function () { img.remove(); });
+        img.src = "https://drive.google.com/thumbnail?id=" + encodeURIComponent(c.door) + "&sz=w400";
+        box.appendChild(img);
+      }
+      t.className = "name"; t.textContent = c.title;
+      a.appendChild(box); a.appendChild(t); li.appendChild(a); ul.appendChild(li);
+    });
+    sec.appendChild(lbl); sec.appendChild(ul);
+    document.querySelector("main").appendChild(sec);
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,334 @@
+// The wall: one tile per file, justified rows (2 on a phone, 4 / 5 on wide screens), boxes
+// reserved before any image, a wave of fades, right-sized thumbnails one viewport ahead, failed
+// tiles that keep their box and retry in place, the loading and error states.
+// Row policy: full rows reach both edges at one height; a short last row is ragged (left-aligned,
+// natural height), never stretched.
+// Every test loads its own page and computes its own baselines.
+// Run: node --test test/wall.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { serve } from "./serve.mjs";
+import { launch, sleep } from "./cdp.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const FIX = join(ROOT, "test", "fixture");
+const READY = `document.querySelectorAll('#wall .tile').length === 60 && document.getElementById('loading').hidden`;
+// visible tiles grouped into rows by their top edge (layout boxes, not mid-animation)
+const ROWS = `(() => { const rows = new Map();
+  for (const t of document.querySelectorAll('#wall .tile')) { if (t.hidden) continue;
+    const r = t.getBoundingClientRect(), k = Math.round(t.offsetTop);
+    if (!rows.has(k)) rows.set(k, []); rows.get(k).push({ n: +t.dataset.n, w: r.width, h: r.height, left: r.left, right: r.right }); }
+  return [...rows.values()]; })()`;
+const LENS = `JSON.stringify(${ROWS}.map((r) => r.length))`;
+const WALL_H = `document.getElementById('wall').getBoundingClientRect().height`;
+const BUCKET = (px) => [400, 600, 800, 1000, 1200].find((z) => z >= px) || 1200;
+const dirs = [];
+let srv, broken, brokenDir, drive, b;
+const errors = [];
+const url = (s, path = "/example/") => s.url + path;
+const light = (extra = []) => b.cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }, ...extra] });
+const resize = (w, h, mobile) => b.cdp("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 2, mobile });
+const fixtureCopy = () => { const d = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "armful-fx-")); dirs.push(d); cpSync(FIX, d, { recursive: true }); return d; };
+const enter = async () => { // a real keyboard Enter on the focused element
+  await b.cdp("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+  await b.cdp("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+};
+
+before(async () => {
+  execFileSync("python3", ["-I", join(ROOT, "bin", "make-fixture.py"), FIX], { stdio: "ignore" });
+  // missing thumbnails: file 0 (a video) and file 59
+  brokenDir = fixtureCopy();
+  rmSync(join(brokenDir, "fx", "p0.svg")); rmSync(join(brokenDir, "fx", "p59.svg"));
+  // production URLs (no thumbs templates), file 0 a 2.4 panorama beside a 0.62 portrait
+  const driveDir = fixtureCopy();
+  const d = JSON.parse(readFileSync(join(driveDir, "data.json"), "utf8"));
+  delete d.thumbs;
+  Object.assign(d.files[0], { w: 2400, h: 1000 }); Object.assign(d.files[1], { w: 620, h: 1000 });
+  writeFileSync(join(driveDir, "data.json"), JSON.stringify(d));
+  srv = await serve();
+  broken = await serve({ fixture: brokenDir });
+  drive = await serve({ fixture: driveDir });
+  b = await launch(); // full URLs: one server per fixture
+  b.on("Runtime.exceptionThrown", (p) => errors.push(p.exceptionDetails?.exception?.description || p.exceptionDetails?.text));
+  await b.cdp("Network.enable");
+  await light();
+});
+after(async () => {
+  await b?.close(); await srv?.close(); await broken?.close(); await drive?.close();
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
+test("phone: 60 tiles, exactly 2 per row, rows at least 100px, 2px gutters", async () => {
+  await b.load(390, 844, true, url(srv), READY);
+  assert.equal(await b.evalJs(`document.querySelectorAll('#wall > a.tile').length`), 60);
+  assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('wall')).gap`), "2px");
+  const rows = await b.evalJs(ROWS);
+  assert.equal(rows.length, 30);
+  for (const [k, r] of rows.entries()) {
+    assert.equal(r.length, 2, `row ${k} has ${r.length} tiles`);
+    assert.ok(r[0].h >= 100, `row ${k} is ${r[0].h}px tall`);
+    assert.ok(Math.abs(r[0].h - r[1].h) < 1, `row ${k}: tiles share a height`);
+    assert.ok(Math.abs(r[0].left) < 1 && Math.abs(r[1].right - 390) < 1, `row ${k} spans the screen`);
+  }
+  // a row of two panoramas (2.4 + 2.4) would be 81px: it holds at 100px, still two across
+  const pano = await b.evalJs(`(() => { const [a, c] = armful.tiles; a.style.setProperty('--ar', '2.400'); c.style.setProperty('--ar', '2.400');
+    armful.layout(); const r = [a, c].map((t) => t.getBoundingClientRect()); return { h: r.map((x) => x.height), top: r.map((x) => x.top), right: r[1].right }; })()`);
+  assert.deepEqual(pano.h, [100, 100]);
+  assert.equal(pano.top[0], pano.top[1]);
+  assert.ok(Math.abs(pano.right - 390) < 1);
+});
+
+test("rows re-pack in place across 999/1000 and 1599/1600", async () => {
+  await b.load(999, 900, false, url(srv), READY);
+  for (const [w, n] of [[999, 2], [1000, 4], [1599, 4], [1600, 5], [1440, 4], [390, 2]]) {
+    await resize(w, 900, false);
+    const want = JSON.stringify(Array.from({ length: Math.ceil(60 / n) }, (_, k) => Math.min(n, 60 - k * n)));
+    assert.ok(await b.until(`${LENS} === ${JSON.stringify(want)}`, 3000), `${w}: rows of ${n}, got ${await b.evalJs(LENS)}`);
+    const rows = await b.evalJs(ROWS);
+    for (const [k, r] of rows.entries()) {
+      assert.ok(r[0].h >= 100, `${w}: row ${k} is ${r[0].h}px`);
+      if (r.length === n) assert.ok(Math.abs(r.at(-1).right - w) < 1, `${w}: row ${k} reaches the edge`);
+    }
+  }
+});
+
+test("every tile reserves its box before any image arrives", async () => {
+  await b.load(390, 844, true, url(srv), READY);
+  const loadedH = await b.evalJs(WALL_H);
+  await b.cdp("Network.setBlockedURLs", { urls: ["*/fx/*"] });
+  try {
+    await b.load(390, 844, true, url(srv), READY);
+    const read = `[...document.querySelectorAll('#wall .tile')].map((t) => ({ h: t.getBoundingClientRect().height,
+      ar: t.style.getPropertyValue('--ar'), css: getComputedStyle(t).aspectRatio, ok: !!t.querySelector('img.ok') }))`;
+    const one = await b.evalJs(read);
+    for (const [i, t] of one.entries()) {
+      assert.ok(t.h > 0, `tile ${i} has a height`);
+      assert.ok(+t.ar >= 0.62 && +t.ar <= 2.4, `tile ${i} --ar ${t.ar}`);
+      assert.notEqual(t.css, "auto", `tile ${i} aspect-ratio`);
+      assert.equal(t.ok, false, `tile ${i} image is blocked`);
+    }
+    await b.load(390, 844, true, url(srv), READY);
+    assert.deepEqual((await b.evalJs(read)).map((t) => t.h), one.map((t) => t.h));
+    assert.equal(await b.evalJs(WALL_H), loadedH, "same wall with and without images");
+  } finally { await b.cdp("Network.setBlockedURLs", { urls: [] }); }
+});
+
+test("images fade in as a wave: 250ms, 12ms stagger along a row, lazy, async", async () => {
+  await b.load(1440, 900, false, url(srv), READY);
+  assert.ok(await b.until(`armful.tiles.slice(0, 4).every((t) => t.querySelector('img.ok'))`), "first row loaded");
+  const imgs = `armful.tiles.slice(0, 4).map((t) => getComputedStyle(t.querySelector('img')))`;
+  assert.deepEqual(await b.evalJs(`${imgs}.map((s) => s.transitionDelay)`), ["0s", "0.012s", "0.024s", "0.036s"]);
+  assert.deepEqual(await b.evalJs(`${imgs}.map((s) => s.transitionDuration + ' ' + s.transitionProperty + ' ' + s.transitionTimingFunction)`),
+    Array(4).fill("0.25s opacity cubic-bezier(0.2, 0, 0, 1)"));
+  assert.deepEqual(await b.evalJs(`(() => { const i = armful.tiles[0].querySelector('img'); return [i.loading, i.decoding, i.getAttribute('src')]; })()`), ["lazy", "async", "fx/p0.svg"]);
+  assert.equal(await b.evalJs(`armful.tiles[0].querySelector('.play') !== null`), true, "videos carry a play badge");
+});
+
+test("thumbnails load one viewport ahead (by height), in both orientations", async () => {
+  for (const [w, h] of [[390, 844], [844, 390]]) {
+    await b.load(w, h, true, url(srv), READY);
+    const split = `armful.tiles.map((t) => ({ top: t.getBoundingClientRect().top, src: !!t.querySelector('img').getAttribute('src') }))`;
+    assert.ok(await b.until(`${split}.filter((t) => t.top < innerHeight * 2 - 1).every((t) => t.src)`, 3000), `${w}x${h}: tiles inside the window have src`);
+    const far = await b.evalJs(`${split}.filter((t) => t.top > innerHeight * 2 + 1)`);
+    assert.ok(far.length > 0, `${w}x${h}: some tiles beyond the window`);
+    assert.deepEqual(far.filter((t) => t.src), [], `${w}x${h}: nothing beyond one viewport`);
+  }
+  // rotate in place: the window follows the new height
+  await b.load(390, 844, true, url(srv), READY);
+  await resize(844, 390, true);
+  await sleep(300);
+  // tiles sourced before the rotation keep their src; judge only the ones still waiting
+  const waiting = await b.evalJs(`armful.tiles.filter((t) => !t.querySelector('img').getAttribute('src')).map((t) => +t.dataset.n)`);
+  await b.evalJs(`scrollTo(0, 2000)`);
+  const split = `${JSON.stringify(waiting)}.map((i) => armful.tiles[i]).map((t) => ({ top: t.getBoundingClientRect().top, src: !!t.querySelector('img').getAttribute('src') }))`;
+  assert.ok(await b.until(`${split}.filter((t) => t.top > -innerHeight + 1 && t.top < innerHeight * 2 - 1).every((t) => t.src)`, 3000));
+  const beyond = await b.evalJs(`${split}.filter((t) => t.top > innerHeight * 2 + 1)`);
+  assert.ok(beyond.length > 0);
+  assert.deepEqual(beyond.filter((t) => t.src), [], "landscape window is 390px, not 844px");
+});
+
+test("each thumbnail asks Drive for its own rendered width x DPR, rounded up (also after a resize)", async () => {
+  await b.cdp("Network.setBlockedURLs", { urls: ["*drive.google.com*"] }); // only the URLs matter
+  try {
+    await b.load(390, 844, true, url(drive), READY);
+    const sz = (i) => `+new URL(armful.tiles[${i}].querySelector('img').src).searchParams.get('sz').slice(1)`;
+    const w = await b.evalJs(`armful.tiles.slice(0, 2).map((t) => t.getBoundingClientRect().width)`);
+    assert.ok(w[0] > 300 && w[1] < 90, `uneven row: ${w}`);
+    assert.equal(await b.evalJs(sz(0)), BUCKET(w[0] * 2));
+    assert.equal(await b.evalJs(sz(0)), 800);
+    assert.equal(await b.evalJs(sz(1)), 400);
+    assert.equal(await b.evalJs(`armful.wallSize()`), 400);
+    // widen in place, then scroll to tiles that had no src yet
+    const unsourced = await b.evalJs(`armful.tiles.filter((t) => !t.querySelector('img').getAttribute('src')).map((t) => +t.dataset.n)`);
+    assert.ok(unsourced.length > 10);
+    await resize(1440, 900, false);
+    assert.ok(await b.until(`${LENS}.startsWith('[4,')`, 3000));
+    await b.evalJs(`scrollTo(0, document.documentElement.scrollHeight)`);
+    const last = unsourced.at(-1);
+    assert.ok(await b.until(`!!armful.tiles[${last}].querySelector('img').getAttribute('src')`, 3000));
+    const late = await b.evalJs(`${JSON.stringify(unsourced)}.filter((i) => armful.tiles[i].querySelector('img').getAttribute('src'))
+      .map((i) => [armful.tiles[i].getBoundingClientRect().width, +new URL(armful.tiles[i].querySelector('img').src).searchParams.get('sz').slice(1)])`);
+    assert.ok(late.length > 0);
+    for (const [width, s] of late) assert.equal(s, BUCKET(width * 2), `tile ${width}px wide asked for w${s}`);
+    assert.ok(late.some(([, s]) => s > 400), "desktop tiles ask for more than the phone size");
+    assert.equal(await b.evalJs(`armful.wallSize()`), 800);
+  } finally { await b.cdp("Network.setBlockedURLs", { urls: [] }); }
+});
+
+test("a failed thumbnail keeps its box, retries in place on Enter, and recovers with focus kept", async () => {
+  const p59 = join(brokenDir, "fx", "p59.svg");
+  rmSync(p59, { force: true });
+  await b.load(390, 844, true, url(broken, "/broken/"), READY);
+  assert.ok(await b.until(`armful.tiles[0].classList.contains('failed')`), "tile 0 failed");
+  await b.evalJs(`scrollTo(0, document.documentElement.scrollHeight)`);
+  assert.ok(await b.until(`armful.tiles[59].classList.contains('failed')`), "tile 59 failed");
+  const h0 = await b.evalJs(WALL_H);
+  const box = `JSON.stringify(armful.tiles[59].getBoundingClientRect())`;
+  const box0 = await b.evalJs(box);
+  assert.equal(await b.evalJs(`document.querySelectorAll('#wall .tile.failed').length`), 2);
+  assert.equal(await b.evalJs(`document.querySelectorAll('#wall button, #wall a a').length`), 0, "nothing interactive nested in a tile");
+  assert.equal(await b.evalJs(`armful.tiles[59].getAttribute('aria-label')`), "Try again");
+  assert.equal(await b.evalJs(`armful.tiles[59].querySelector('.retry').getAttribute('aria-hidden')`), "true");
+  assert.equal(await b.evalJs(`getComputedStyle(armful.tiles[59]).boxShadow.includes('inset')`), true, "hairline");
+  assert.equal(await b.evalJs(`getComputedStyle(armful.tiles[0].querySelector('.play')).visibility`), "hidden", "no play badge on a failed video");
+  assert.equal(await b.evalJs(`armful.tiles[1].getAttribute('aria-label')`), "Photo 2 of 60");
+  // first retry still fails: a new attempt number, same box, focus kept, no previewer
+  await b.evalJs(`armful.tiles[59].focus()`);
+  await enter();
+  assert.ok(await b.until(`armful.tiles[59].dataset.err === '2'`), "the retry was attempted and failed");
+  assert.equal(await b.evalJs(`new URL(armful.tiles[59].querySelector('img').src).searchParams.get('r')`), "1");
+  assert.equal(await b.evalJs(`document.getElementById('lb').hidden`), true, "retry does not open the previewer");
+  assert.equal(await b.evalJs(`document.activeElement === armful.tiles[59]`), true);
+  assert.equal(await b.evalJs(box), box0); assert.equal(await b.evalJs(WALL_H), h0);
+  // the picture is back: the next retry asks with r=2 and recovers
+  cpSync(join(FIX, "fx", "p59.svg"), p59);
+  await enter();
+  assert.ok(await b.until(`armful.tiles[59].querySelector('img.ok') !== null && !armful.tiles[59].classList.contains('failed')`), "recovered");
+  assert.equal(await b.evalJs(`new URL(armful.tiles[59].querySelector('img').src).searchParams.get('r')`), "2");
+  assert.equal(await b.evalJs(`armful.tiles[59].querySelector('.retry')`), null);
+  assert.equal(await b.evalJs(`armful.tiles[59].getAttribute('aria-label')`), "Photo 60 of 60");
+  assert.equal(await b.evalJs(`document.activeElement === armful.tiles[59]`), true, "focus stays on the link");
+  assert.equal(await b.evalJs(box), box0); assert.equal(await b.evalJs(WALL_H), h0);
+  assert.equal(await b.evalJs(`document.getElementById('lb').hidden`), true);
+  // recovered: Enter now opens that photo
+  await enter();
+  assert.equal(await b.evalJs(`document.getElementById('lb').hidden`), false);
+  assert.match(await b.evalJs(`document.getElementById('lbDrive').href`), /\/file\/d\/59\/view$/);
+  await b.key("Escape", 27);
+  rmSync(p59, { force: true });
+});
+
+test("loading shows the heap symbol with the footer inert; a failed data.json says so", async () => {
+  const paused = [];
+  const off = b.on("Fetch.requestPaused", (p) => paused.push(p.requestId));
+  await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*data.json*" }] });
+  try {
+    await b.load(390, 844, true, url(srv), "true");
+    for (let k = 0; k < 50 && !paused.length; k++) await sleep(100);
+    assert.equal(paused.length, 1, "data.json was requested");
+    assert.equal(await b.evalJs(`document.getElementById('loading').hidden`), false);
+    assert.equal(await b.evalJs(`document.querySelector('#loading .symbol').getBoundingClientRect().width > 0`), true);
+    assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#loading .symbol .top')).animationName`), "pulse");
+    assert.equal(await b.evalJs(`document.querySelector('footer').inert`), true, "footer out of the tab order while loading");
+    await b.cdp("Fetch.fulfillRequest", { requestId: paused[0], responseCode: 500, body: "" });
+    assert.ok(await b.until(`document.getElementById('loading').innerText.includes('The photos didn’t load.')`), "error text");
+    assert.equal(await b.evalJs(`(() => { const t = [...document.querySelectorAll('#loading button')].find((x) => !x.hidden); return t ? t.textContent.trim() : null; })()`), "Try again");
+  } finally { await b.cdp("Fetch.disable"); off(); }
+});
+
+test("a data.json of the wrong shape shows the error state and mounts nothing", async () => {
+  const bad = [
+    { files: [{ i: "a", w: 10, h: 10, p: 5 }] },
+    { files: [{ i: "a", w: 0, h: 10, p: [] }] },
+    { files: [{ i: 7, w: 10, h: 10, p: [] }] },
+    { files: "nope" },
+    { files: [{ i: "a", w: 10, h: 10, p: [] }], thumbs: { wall: 5 } },
+  ];
+  for (const body of bad) {
+    const off = b.on("Fetch.requestPaused", (p) => b.cdp("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200,
+      responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from(JSON.stringify(body)).toString("base64") }));
+    await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*data.json*" }] });
+    try {
+      await b.load(390, 844, true, url(srv), "true");
+      assert.ok(await b.until(`document.getElementById('loading').innerText.includes('The photos didn’t load.')`), JSON.stringify(body));
+      assert.equal(await b.evalJs(`document.querySelectorAll('#wall *').length`), 0, "nothing mounted");
+      assert.equal(await b.evalJs(`armful.D`), undefined, "data not published");
+    } finally { await b.cdp("Fetch.disable"); off(); }
+  }
+});
+
+test("after load: no loading state, footer reachable, the clicked file opens even after a filter", async () => {
+  await b.load(390, 844, true, url(srv), READY);
+  assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('loading')).display`), "none");
+  assert.equal(await b.evalJs(`document.querySelector('footer').inert`), false);
+  await b.evalJs(`armful.tiles[3].click()`);
+  assert.equal(await b.evalJs(`document.getElementById('lb').hidden`), false);
+  assert.match(await b.evalJs(`document.getElementById('lbDrive').href`), /\/file\/d\/3\/view$/);
+  await b.key("Escape", 27);
+  assert.equal(await b.evalJs(`document.getElementById('lb').hidden`), true);
+  await b.evalJs(`armful.setShown(armful.tiles.map((_, i) => i % 3 === 0))`);
+  assert.equal(await b.evalJs(`armful.tiles.some((t) => t.getAnimations().length > 0)`), true, "tiles travel");
+  assert.ok(await b.until(`document.getAnimations().filter((a) => a.effect?.target?.classList?.contains('tile')).length === 0`, 2000), "FLIP settles");
+  const rows = await b.evalJs(ROWS);
+  assert.equal(rows.length, 10);
+  for (const r of rows) assert.equal(r.length, 2);
+  await b.evalJs(`armful.tiles[9].click()`); // second row, first tile after the filter
+  assert.match(await b.evalJs(`document.getElementById('lbDrive').href`), /\/file\/d\/9\/view$/);
+  assert.equal(await b.evalJs(`document.getElementById('lbCount').textContent`), "4 / 20");
+  await b.key("Escape", 27);
+});
+
+test("a filter that leaves a short last row: ragged, natural height, not stretched", async () => {
+  await b.load(390, 844, true, url(srv), READY);
+  await b.evalJs(`armful.setShown(armful.tiles.map((_, i) => i < 5))`);
+  assert.ok(await b.until(`document.getAnimations().length === 0 || document.getAnimations().every((a) => a.playState !== 'running')`, 2000));
+  const rows = await b.evalJs(ROWS);
+  assert.deepEqual(rows.map((r) => r.length), [2, 2, 1]);
+  const lone = rows[2][0];
+  assert.ok(lone.left < 1, "starts at the left edge");
+  assert.ok(lone.right < 389, `ragged: ends at ${lone.right}, not the edge`);
+  assert.ok(lone.h >= 100, "at least a row tall");
+  assert.equal(await b.evalJs(`document.getElementById('empty').hidden`), true);
+  await b.evalJs(`armful.setShown(armful.tiles.map(() => false))`);
+  assert.equal(await b.evalJs(`document.getElementById('empty').hidden`), false, "nothing shown: the empty state");
+});
+
+test("reduced motion: setShown snaps, nothing animates", async () => {
+  await light([{ name: "prefers-reduced-motion", value: "reduce" }]);
+  try {
+    await b.load(390, 844, true, url(srv), READY);
+    await b.evalJs(`armful.setShown(armful.tiles.map((_, i) => i % 2 === 0))`);
+    assert.equal(await b.evalJs(`document.getAnimations().length`), 0);
+    assert.equal(await b.evalJs(`armful.tiles.every((t) => !t.style.transform && !t.style.opacity)`), true);
+    assert.equal(await b.evalJs(`armful.tiles.filter((t) => !t.hidden).length`), 30);
+    assert.equal(await b.evalJs(`getComputedStyle(armful.tiles[0]).transitionDuration`), "0s");
+    assert.deepEqual((await b.evalJs(ROWS)).map((r) => r.length), Array(15).fill(2));
+  } finally { await light(); }
+});
+
+test("tilesOf maps each person to exactly their files", async () => {
+  await b.load(390, 844, true, url(srv), READY);
+  const files = JSON.parse(readFileSync(join(FIX, "data.json"), "utf8")).files;
+  const want = {};
+  files.forEach((f, i) => f.p.forEach((pid) => (want[pid] ||= []).push(i)));
+  assert.deepEqual(await b.evalJs(`Object.fromEntries([...armful.tilesOf].map(([k, v]) => [k, v]))`), want);
+});
+
+test("helpers honour data.json thumbs; head carries the Veil colours and the favicon", async () => {
+  await b.load(390, 844, true, url(srv), READY);
+  assert.equal(await b.evalJs(`armful.thumbUrl({ i: '7', w: 4, h: 3 }, 400)`), "fx/p7.svg");
+  assert.equal(await b.evalJs(`armful.bigUrl({ i: '7', w: 4, h: 3 })`), "fx/p7.svg");
+  assert.equal(await b.evalJs(`armful.faceUrl({ id: 5, rep: { f: 0, box: [0, 0, 10] } })`), "fx/f5.svg");
+  assert.deepEqual(await b.evalJs(`[...document.querySelectorAll('meta[name=theme-color]')].map((m) => m.media + ' ' + m.content)`),
+    ["(prefers-color-scheme: light) #FBFAF7", "(prefers-color-scheme: dark) #0D0F0E"]);
+  assert.equal(await b.evalJs(`document.querySelector('link[rel=icon]')?.getAttribute('href')`), "favicon.svg");
+  assert.equal(await b.evalJs(`document.querySelector('footer').textContent.trim().replace(/\\s+/g, ' ')`), "Want your face removed? Write to photos@armful.photos");
+  assert.equal(await b.evalJs(`document.querySelector('aside#panel.panel') !== null`), true);
+});
+
+test("nothing threw", () => assert.deepEqual(errors, []));

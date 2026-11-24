@@ -1,0 +1,29 @@
+/* armful.photos/ and the 404 page. Every token comes from site/style.css (linked first);
+   this file only lays out one column: the wordmark, the line, the lede, the footer. */
+body.home { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: 1fr auto; }
+.home main, .home footer { width: 100%; max-width: 608px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+.home main { display: flex; flex-direction: column; justify-content: center; padding-top: max(56px, var(--st)); padding-bottom: 56px; }
+.home h1 { line-height: 0; }
+.home h1 a { display: inline-block; color: inherit; border-radius: 4px; }
+.mark { display: block; width: min(60vw, 560px); max-width: 100%; height: auto; color: var(--text); }
+.home .title { margin-top: 40px; max-width: 15em; color: var(--text); text-wrap: balance; }
+.home .lede { margin-top: 16px; max-width: 32em; color: var(--dim); text-wrap: pretty; }
+/* the collection page's footer rule (hairline, centred) does not apply here */
+.home footer { margin: 0 auto; border: 0; text-align: left; padding-top: 0; padding-bottom: 16px; }
+.home footer a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+.home footer a:hover { color: var(--text); }
+.lost main { align-items: center; }
+/* Recent armfuls (drawn by the home page's inline script only when this browser has some):
+   the label, then 2 cards a row on a phone, 3 wider. A cream box holds the door photo at 3:2. */
+.recent { margin-top: 48px; }
+.recent .lbl { margin-bottom: 12px; }
+.cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+@media (min-width: 560px) { .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.card { display: block; color: var(--text); text-decoration: none; border-radius: 14px; -webkit-tap-highlight-color: transparent; }
+.card .thumb { display: block; position: relative; aspect-ratio: 3 / 2; border-radius: 14px; overflow: hidden; background: var(--cream); }
+.card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--fade); }
+.card img.in { opacity: 1; }
+.card .name { display: block; margin-top: 8px; font: 500 14px/20px var(--sans); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card:active .thumb { transform: scale(var(--press)); transition: transform var(--press-t) cubic-bezier(.2, 0, 0, 1); }
+@media (prefers-color-scheme: dark) { .card .thumb { background: rgba(242, 239, 232, .1); } }

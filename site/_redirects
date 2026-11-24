@@ -1,0 +1,8 @@
+# Source for dist/_redirects: bin/build-dist.mjs copies it to the root of dist/ only.
+# Rules here never apply to requests the Functions middleware answers, so the bare
+# collection path (/<slug> -> /<slug>/) is redirected in functions/_middleware.js.
+#
+# armful.pages.dev -> armful.photos cannot live here: Pages _redirects does not support
+# domain-level redirects ("https://armful.pages.dev/* https://armful.photos/:splat 301"
+# would be ignored). Set it up once as an account Bulk Redirect instead (see DEPLOY.md):
+#   source armful.pages.dev, target https://armful.photos, 301, preserve path + query.

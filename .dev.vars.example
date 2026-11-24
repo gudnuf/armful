@@ -1,0 +1,5 @@
+# Local secrets for `wrangler pages dev`. Copy to .dev.vars (git-ignored) and
+# put the real value (four or more random words) after the "=" there, never
+# here. One line per collection: COLLECTION_PASSWORD_ + the slug upper-cased,
+# "-" -> "_".
+COLLECTION_PASSWORD_EXAMPLE=

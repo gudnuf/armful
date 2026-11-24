@@ -1,0 +1,40 @@
+# Source for dist/_headers: bin/build-dist.mjs copies it to the root of dist/ only.
+# Every rule that matches a path applies. Pages allows one splat (*) per pattern;
+# :dir is one path segment (a collection slug, or static for the home page's files).
+#
+# The gate middleware (functions/_middleware.js) adds X-Robots-Tag and Vary: Cookie to
+# every collection response and turns public into private there. The home page and the
+# 404 page get no robots header: the home page is indexable, the 404 carries a meta noindex.
+
+/*
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+# fingerprinted: the name carries a content hash, so a changed file is a new URL
+/:dir/*.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/:dir/*.css
+  Cache-Control: public, max-age=31536000, immutable
+
+# the home page's link-preview card (static/og.<hash>.png)
+/static/*.png
+  Cache-Control: public, max-age=31536000, immutable
+
+# fonts are fingerprinted too (the stylesheet names the hashed file)
+/:dir/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# page data is private (only ever behind the gate) and revalidates every time
+# (Pages sends an ETag, so it is a cheap 304)
+/:dir/data.json
+  Cache-Control: private, no-cache
+
+# the pages.dev copy is never the one to index (Bulk Redirect sends people to the apex)
+https://armful.pages.dev/*
+  X-Robots-Tag: noindex
+
+# preview deployments (<hash>.armful.pages.dev, <branch>.armful.pages.dev) are never indexed
+https://:sub.armful.pages.dev/*
+  X-Robots-Tag: noindex
