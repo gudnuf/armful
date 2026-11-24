@@ -3,7 +3,7 @@
 // the files tapping it would give, the other rows as they are; zeros fade and take no tap; a tap on
 // the chosen one clears it; × clears everything. The wall is in time order by day, with a sticky
 // day label and a right-edge day scrubber that navigates and never filters. The hash keeps the
-// query (#p=1.2&any&n=4&d=3e&m=v&s=p) and old people links still read. No interaction shifts the
+// query (#p=1.2&n=4&d=3e&m=v&s=p) and old people links (#p=1.2, #p=1.2&any: together) still read. No interaction shifts the
 // layout (CLS 0) at 390x844 or 1440x900.
 // Run: node --test test/filters.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
 import { test, before, after } from "node:test";
@@ -40,7 +40,7 @@ function model() {
       part: h == null ? "" : h >= 4 && h < 12 ? "m" : h >= 12 && h < 18 ? "a" : "e", shape: f.h > f.w ? "p" : f.w > f.h ? "l" : "" };
   });
 }
-const pass = (f, q) => (!q.p?.length || (q.any ? q.p.some((x) => f.p.includes(x)) : q.p.every((x) => f.p.includes(x))))
+const pass = (f, q) => (!q.p?.length || q.p.every((x) => f.p.includes(x)))
   && (q.n == null || BANDS[q.n](f.nf)) && (q.d == null || (f.day === q.d && (!q.part || f.part === q.part)))
   && (!q.m || (q.m === "v") === f.v) && (!q.s || f.shape === q.s);
 const want = (q) => FILES.map((f, i) => [f, i]).filter(([f]) => pass(f, q)).map(([, i]) => i);
@@ -194,15 +194,21 @@ test("the pill: faces, the filter icon, a line of words (no count) and ×; × cl
   mobile = true;
   await b.load(390, 844, true, "/example/#p=1.2&n=4&d=2&m=f", READY);
   const terms = await b.evalJs(`document.getElementById('terms').textContent`);
-  assert.equal(terms, "together · 4+ · Day 2 · photos");
+  assert.equal(terms, "4+ · Day 2 · photos", "only the filters, no words for the people");
+  assert.match(await b.evalJs(`document.getElementById('pair').getAttribute('aria-label')`), /together/, "said to screen readers");
   assert.doesNotMatch(terms, /\d+ (photo|file)|^\d+$/, "no count in the pill");
   assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 2);
   assert.equal(await visible("#clear"), true);
   assert.equal(await visible("#people"), false, "the held faces stand in for the three");
   const bar = await b.evalJs(`document.getElementById('bar').getBoundingClientRect().toJSON()`);
   assert.ok(bar.right <= 390 - 14 + 0.5, `the pill fits the phone: ${bar.right}`);
-  assert.equal(await b.evalJs(`(() => { const t = document.getElementById('terms'); return t.scrollWidth > t.clientWidth && getComputedStyle(t).textOverflow; })()`), "ellipsis", "a long line truncates");
   await agrees({ p: [1, 2], n: 4, d: 2, m: "f" }, "from the URL");
+  // a long line truncates inside the pill, which still fits the phone
+  await b.load(390, 844, true, "/example/#p=1.2.3&n=2&d=3e&m=f&s=l", READY);
+  assert.equal(await b.evalJs(`document.getElementById('terms').textContent`), "2–3 · Day 3 evening · photos · landscape");
+  assert.equal(await b.evalJs(`(() => { const t = document.getElementById('terms'); return t.scrollWidth > t.clientWidth && getComputedStyle(t).textOverflow; })()`), "ellipsis", "a long line truncates");
+  assert.ok(await b.evalJs(`document.getElementById('bar').getBoundingClientRect().right`) <= 390 - 14 + 0.5, "the pill fits");
+  await b.load(390, 844, true, "/example/#p=1.2&n=4&d=2&m=f", READY);
   // × clears everything: people, filters and the hash
   await tapId("clear");
   assert.equal(await hash(), "");
@@ -309,21 +315,21 @@ test("the swap: the filter icon folds the faces away and opens the filters in th
 
 test("the URL: the query round-trips; old people links still read; nonsense is dropped", async () => {
   mobile = true;
-  const full = "#p=1.2&any&n=2&d=3e&m=f&s=l";
+  const full = "#p=1.2&n=2&d=3e&m=f&s=l";
   await b.load(390, 844, true, "/example/" + full, READY);
-  assert.deepEqual(await b.evalJs(`(({ picked, any, n, d, part, m, s }) => ({ picked, any, n, d, part, m, s }))(armful.state)`),
-    { picked: [1, 2], any: true, n: 2, d: 3, part: "e", m: "f", s: "l" });
-  await agrees({ p: [1, 2], any: true, n: 2, d: 3, part: "e", m: "f", s: "l" }, "the full hash");
+  assert.deepEqual(await b.evalJs(`(({ picked, n, d, part, m, s }) => ({ picked, n, d, part, m, s }))(armful.state)`),
+    { picked: [1, 2], n: 2, d: 3, part: "e", m: "f", s: "l" });
+  await agrees({ p: [1, 2], n: 2, d: 3, part: "e", m: "f", s: "l" }, "the full hash");
   // a change writes the hash back in the same shape; that hash loads the same wall
   await b.evalJs(`armful.openView('filters')`);
   await settled();
   await tapOpt("Landscape");
-  assert.equal(await hash(), "#p=1.2&any&n=2&d=3e&m=f");
+  assert.equal(await hash(), "#p=1.2&n=2&d=3e&m=f");
   const was = await shown();
-  await b.load(390, 844, true, "/example/#p=1.2&any&n=2&d=3e&m=f", READY);
+  await b.load(390, 844, true, "/example/#p=1.2&n=2&d=3e&m=f", READY);
   assert.deepEqual(await shown(), was, "the hash round-trips");
   // old links: people only
-  for (const [h, q] of [["#p=1.2", { p: [1, 2] }], ["#p=1.2&any", { p: [1, 2], any: true }], ["#p=3", { p: [3] }]]) {
+  for (const [h, q] of [["#p=1.2", { p: [1, 2] }], ["#p=1.2&any", { p: [1, 2] }], ["#p=3", { p: [3] }]]) {
     await b.load(390, 844, true, "/example/" + h, READY);
     assert.deepEqual(await shown(), want(q), `${h}`);
     assert.equal(await hash(), h, `${h} stays as it was`);
@@ -462,7 +468,8 @@ for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
       ["open the faces", () => tapId("people")],
       ["hold a face", () => press(`document.querySelector('#list .face[data-pid="1"]')`)],
       ["hold another", () => press(`document.querySelector('#list .face[data-pid="2"]')`)],
-      ["any", () => tapId("pair")],
+      ["the pair swaps to the filters", () => tapId("pair")],
+      ["and back", () => tapId("pair")],
       ["swap to the filters", () => tapId("fbtn")],
       ["a day", () => tapOpt("Day 2")],
       ["a part of it", () => tapOpt("Morning")],

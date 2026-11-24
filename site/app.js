@@ -12,7 +12,8 @@
 // The query: the hold (people), plus three filters, AND across them, one value each: how many
 // faces a file has (every face the scan found, named people or not), the day of the trip (and the
 // part of that day) and the media (videos / photos, portrait / landscape). The URL's hash keeps it:
-// #p=3.7&any&n=4&d=3e&m=v&s=p (the old #p=3.7 / #p=3.7&any links read the same).
+// #p=3.7&n=4&d=3e&m=v&s=p. The held people are always together: the files with all of them (an
+// old #p=3.7&any link reads as #p=3.7).
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
@@ -40,12 +41,12 @@
   const sections = []; // one per day in wall order, the undated last: { day, el, tag, tick, tiles }
 
   // ---- the state, and what is on screen ----
-  // phase: skeleton (the static first paint) | ready | error. picked / any: the hold. n: a faces
+  // phase: skeleton (the static first paint) | ready | error. picked: the hold. n: a faces
   // band (0 no one, 1, 2 = 2-3, 4 = 4+, 8 = 8+); d: a day of the trip, part: m / a / e within it;
   // m: v videos / f photos; s: p portrait / l landscape (null: any). The URL's hash mirrors them.
   // railOpen: the panel above the pill is open; view: which of its two views (faces | filters).
   // lb: the previewer's place in lbSet (the files the wall showed when it opened), -1 when closed.
-  const state = { phase: "skeleton", picked: [], any: false, n: null, d: null, part: null, m: null, s: null,
+  const state = { phase: "skeleton", picked: [], n: null, d: null, part: null, m: null, s: null,
     railOpen: false, view: "faces", lb: -1 };
   let lbSet = [];
   const drawn = { phase: "skeleton", filter: "", panel: "0|faces", was: { open: false, view: "faces" }, lb: -1, lbSet: null };
@@ -437,7 +438,7 @@
     let shown = 0;
     for (let i = 0; i < N; i++) {
       const f = D.files[i], k = facesOf[i];
-      const pp = !sel.size || (q.any ? f.p.some((p) => sel.has(p)) : q.picked.every((p) => f.p.includes(p)));
+      const pp = !sel.size || q.picked.every((p) => f.p.includes(p));
       const pn = q.n == null || inBand(q.n, k);
       const pd = q.d == null || (dayOf[i] === q.d && (!q.part || partOf[i] === q.part));
       const pm = !q.m || (q.m === "v") === !!f.v;
@@ -464,10 +465,10 @@
   }
   const filtering = () => state.n != null || state.d != null || state.m != null || state.s != null;
   const active = () => state.picked.length > 0 || filtering();
-  // what is chosen, in a few words: together / any (two or more held), then the filters
+  // the filters, in a few words (the pill's line; nothing for people alone: the held faces say it,
+  // overlapping)
   function terms() {
     const t = [];
-    if (state.picked.length >= 2) t.push(state.any ? "any" : "together");
     if (state.n != null) t.push(state.n === 0 ? "no one" : state.n === 1 ? "solo" : BANDS.find(([b]) => b === state.n)[1]);
     if (state.d != null) t.push(`Day ${state.d}${state.part ? " " + PARTS[state.part] : ""}`);
     if (state.m) t.push(state.m === "v" ? "videos" : "photos");
@@ -490,7 +491,7 @@
   }
 
   // ---- the hold: who is held, and whether the wall shows photos with all of them (together, the
-  // default) or with any of them (any: a tap on the held faces, unannounced) ----
+  // ---- (the wall shows the files with all of them) ----
   const plural = (n, w) => `${nf(n)} ${w}${n === 1 ? "" : "s"}`;
   // the header's count cells: a small icon (person, photo, play) and the number
   const statIcon = {
@@ -498,20 +499,16 @@
     f: '<svg viewBox="0 0 12 12" aria-hidden="true"><path fill-rule="evenodd" d="M1 2.2h10v7.6H1zM2.2 8.6h7.6L7.4 5.2 5.6 7.4 4.4 6.2z"/></svg>',
     v: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.8l7.2 4.2L3 10.2z"/></svg>' };
   const statCell = (k, n) => `<span class="st st-${k}" aria-hidden="true">${statIcon[k]}${nf(n)}</span>`;
-  // which files have everyone in `sel` (together) or anyone in it (any); nobody held: every file
-  function matches(sel, any) {
+  // which files have everyone in `sel`; nobody held: every file
+  function matches(sel) {
     if (!sel.size) return D.files.map(() => true);
-    return D.files.map((f) => (any ? f.p.some((p) => sel.has(p)) : [...sel].every((p) => f.p.includes(p))));
+    return D.files.map((f) => [...sel].every((p) => f.p.includes(p)));
   }
   // the number beside a face: the count you would get by tapping it, the filters as they are (one
-  // pass over the files: tally counts each person over the shown files, beyond over the files the
-  // filters pass that the hold does not show)
-  let shownN = 0, tally = new Map(), beyond = new Map();
-  function countFor(pid) {
-    const t = tally.get(pid) || 0;
-    if (!state.picked.length || !state.any) return t; // nobody held: theirs; together: shown ∩ theirs
-    return shownN + (beyond.get(pid) || 0); // any: shown ∪ theirs
-  }
+  // pass over the shown files: tally counts each person in them; nobody held, that is theirs; someone
+  // held, the shown files with them too)
+  let shownN = 0, tally = new Map();
+  function countFor(pid) { return tally.get(pid) || 0; }
   // the held faces, small, into `el` (the pill; the previewer reuses it): at most four, then +N.
   // Faces already there stay (their pictures never reload); only the difference is added or removed.
   function renderPair(el, picked = state.picked) {
@@ -535,11 +532,9 @@
   // the wall, the counts, the options and the pill for the query in `state`
   function drawFilter(animate) {
     const sel = new Set(state.picked), ev = evaluate(), { ok, F } = ev, k = state.picked.length;
-    shownN = ev.shown; tally = new Map(); beyond = new Map();
+    shownN = ev.shown; tally = new Map();
     ok.forEach((y, i) => {
-      if (!y && !F[i]) return;
-      const m = y ? tally : beyond;
-      for (const p of new Set(D.files[i].p)) m.set(p, (m.get(p) || 0) + 1);
+      if (y) for (const p of new Set(D.files[i].p)) tally.set(p, (tally.get(p) || 0) + 1);
     });
     setShown(ok, animate);
     updateCounts(countFor);
@@ -574,19 +569,18 @@
     setAttr(st, "aria-label", said);
     const pair = $("pair");
     renderPair(pair);
-    pair.classList.toggle("tight", !state.any);
-    pair.classList.toggle("apart", state.any);
-    setAttr(pair, "aria-label", "Held: " + state.picked.map((p) => `Person ${p}`).join(", "));
+    // for screen readers: who (the photos with all of them together)
+    setAttr(pair, "aria-label", "Held: " + state.picked.map((p) => `Person ${p}`).join(", ") + (k >= 2 ? ", together" : ""));
     // nothing together: say so, and offer to let go
-    setText($("empty").querySelector("p"), k >= 2 && !state.any && !filtering() ? "No photos of them together" : "No photos");
+    setText($("empty").querySelector("p"), k >= 2 && !filtering() ? "No photos of them together" : "No photos");
     $("empty").querySelector("button").hidden = !active();
     requestAnimationFrame(() => { placeTicks(); dayTag(); });
   }
-  const filterKey = () => JSON.stringify([state.picked, state.any, state.n, state.d, state.part, state.m, state.s]);
-  // the URL keeps the query: #p=3.7&any&n=4&d=3e&m=v&s=p (each part only when chosen)
+  const filterKey = () => JSON.stringify([state.picked, state.n, state.d, state.part, state.m, state.s]);
+  // the URL keeps the query: #p=3.7&n=4&d=3e&m=v&s=p (each part only when chosen)
   function save() {
     const h = [];
-    if (state.picked.length) h.push(`p=${state.picked.join(".")}`, ...(state.any ? ["any"] : []));
+    if (state.picked.length) h.push(`p=${state.picked.join(".")}`);
     if (state.n != null) h.push(`n=${state.n}`);
     if (state.d != null) h.push(`d=${state.d}${state.part || ""}`);
     if (state.m) h.push(`m=${state.m}`);
@@ -603,7 +597,6 @@
       if (!kv.has(key)) kv.set(key, j < 0 ? "" : x.slice(j + 1));
     }
     state.picked = [...new Set((kv.get("p") || "").split(".").filter((x) => /^\d{1,9}$/.test(x)).map(Number))].filter((p) => byId.has(p));
-    state.any = state.picked.length > 0 && kv.has("any");
     state.n = /^[01248]$/.test(kv.get("n") || "") ? +kv.get("n") : null;
     const dm = /^(\d{1,4})([mae])?$/.exec(kv.get("d") || "");
     state.d = dm && +dm[1] >= 1 && +dm[1] <= nDays ? +dm[1] : null;
@@ -614,11 +607,9 @@
   function toggle(pid) {
     const k = state.picked.indexOf(pid);
     if (k >= 0) state.picked.splice(k, 1); else state.picked.push(pid);
-    if (!state.picked.length) state.any = false;
     render(); save();
   }
-  function setAny(any) { state.any = any; render(); save(); }
-  function clear() { setQuery({ picked: [], any: false, n: null, d: null, part: null, m: null, s: null }); }
+  function clear() { setQuery({ picked: [], n: null, d: null, part: null, m: null, s: null }); }
   // a tapped face springs along an arc from the list into the hold (a copy flies; the real one
   // waits hidden until it lands); reduced motion: it is simply there
   function fly(from, pid) {
@@ -650,8 +641,8 @@
       toggle(pid);
       if (adding) fly(btn, pid);
     });
-    // the held faces: two or more toggle together / any; one held, they are the faces button
-    $("pair").onclick = () => { if (state.picked.length >= 2) setAny(!state.any); else $("people").onclick(); };
+    // the held faces do what the filter icon does: folded, they open the faces; open, they swap the views
+    $("pair").onclick = () => openView(state.railOpen && state.view === "faces" ? "filters" : "faces");
     $("clear").onclick = clear;
     for (const c of document.querySelectorAll("#panel .clearAll")) c.onclick = clear;
     $("empty").querySelector("button").onclick = clear;
@@ -830,9 +821,9 @@
     $("lbPair").hidden = !k;
     if (k) {
       renderPair($("lbPair"));
-      $("lbPair").className = `pair ${state.any ? "apart" : "tight"}`;
+      $("lbPair").className = "pair tight";
     } else $("lbPair").replaceChildren();
-    setText($("lbLine"), terms().filter((w) => w !== "together" && w !== "any").join(" · "));
+    setText($("lbLine"), terms().join(" · "));
     const from = !motion.matches && lbx.from ? lbx.from.getBoundingClientRect() : null;
     $("lb").hidden = false;
     document.body.classList.add("lbOpen");
@@ -1060,7 +1051,7 @@
 
   // for the panel, the hold and the tests
   window.armful = { thumbUrl, faceUrl, bigUrl, wallSize, setShown, layout, updateCounts, panelOpen,
-    state, render, matches, countFor, toggle, setAny, clear, renderPair, openView, setQuery, evaluate, terms,
+    state, render, matches, countFor, toggle, clear, renderPair, openView, setQuery, evaluate, terms,
     get D() { return D; }, get tiles() { return tiles; }, get tilesOf() { return tilesOf; },
     get wallTiles() { return wallTiles; }, get days() { return { dayOf, partOf, shapeOf, facesOf, nDays }; } };
 })();

@@ -190,7 +190,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   text-align: center; background: var(--text); color: var(--ground); transition: opacity var(--fade); }
 .face.dim + .count { opacity: .3; }
 .face img[style*="background-image"] { background-repeat: no-repeat; } /* the CSS crop of a rotated photo */
-/* the held faces: overlapping = together, apart = any */
+/* the held faces, overlapping */
 .pair { all: unset; box-sizing: border-box; display: flex; align-items: center; min-height: 44px; padding-left: 0; cursor: pointer;
   border-radius: 999px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .pair[hidden] { display: none; }
@@ -198,7 +198,6 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .pair .face { --s: 36px; min-height: 36px; cursor: inherit; transition: margin var(--spring); }
 .pair .face.held img { box-shadow: 0 0 0 2px var(--ground); }
 .pair.tight .face + .face { margin-left: -14px; }
-.pair.apart .face + .face { margin-left: 4px; }
 .pair .more { margin-left: 6px; font: 600 13px/20px var(--sans); font-variant-numeric: tabular-nums; }
 .x { all: unset; box-sizing: border-box; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex: none;
   cursor: pointer; color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
@@ -412,7 +411,6 @@ body.lbOpen { overflow: hidden; }
 .lbHold .face { --s: 36px; cursor: default; }
 .lbHold .face.held img { box-shadow: 0 0 0 2px var(--ground), 0 0 0 3.5px var(--paper); }
 .lbHold .pair.tight .face + .face { margin-left: -14px; }
-.lbHold .pair.apart .face + .face { margin-left: 6px; }
 
 @media (max-width: 999px) {
   /* previewer: the photo edge to edge, arrows low where the thumb is */

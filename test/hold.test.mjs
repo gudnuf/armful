@@ -1,7 +1,7 @@
-// The hold: tap faces to hold them. The pill shows the held faces, "N photos" and ×; two or more
-// mean together (photos with all of them), and a tap on the faces switches to any (photos with
-// any of them) without a word on screen. Every list count is the count you would get by tapping
-// that face; the URL keeps the hold.
+// The hold: tap faces to hold them. The pill shows the held faces and ×; two or more mean the
+// photos with all of them (there is no other mode), without a word on screen. A tap on the held
+// faces does what the filter icon does (open the faces, or swap to the filters). Every list count
+// is the count you would get by tapping that face; the URL keeps the hold (an old &any is ignored).
 // Run: node --test test/hold.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -34,7 +34,7 @@ const openList = async () => {
 const face = async (pid) => { await openList(); await tap(`#list .face[data-pid="${pid}"]`); };
 const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
 // no hint anywhere in the panel (the empty state's one plain sentence is checked on its own; the
-// pill's line of filter words says "together" / "any" as a word, checked on its own too)
+// pill's line holds filter words only, checked on its own too)
 const noHints = async () => assert.doesNotMatch(await b.evalJs(`(() => { const p = document.getElementById('panel').cloneNode(true); p.querySelector('#terms').remove(); return p.textContent; })()`), NO_HINTS);
 // the header for the files `idx`: N distinct people in them, their photos and videos
 const stats = (idx) => { const v = idx.filter((i) => D.files[i].v).length; return statsFor(new Set(idx.flatMap((i) => D.files[i].p)).size, idx.length - v, v); };
@@ -53,7 +53,7 @@ before(async () => {
 });
 after(async () => { await b?.close(); await srv?.close(); });
 
-test("phone: one held, together, any, the empty state, letting go, clearing", async () => {
+test("phone: one held, together, the pair swaps the views, the empty state, letting go, clearing", async () => {
   await b.load(390, 844, true, "/example/", READY);
   assert.equal(await visible("#pair"), false);
 
@@ -85,26 +85,33 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.deepEqual(await shown(), filesWith((p) => p.includes(1) && p.includes(2)));
   assert.equal(await text("peopleLabel"), "9 photos");
   assert.equal(await b.evalJs(STATS), stats(filesWith((p) => p.includes(1) && p.includes(2))), "the header: together");
-  assert.deepEqual(await b.evalJs(NO_TEXT), ["together"], "the pill's line: together, no count");
+  assert.deepEqual(await b.evalJs(NO_TEXT), [], "people alone: the faces, no words");
+  assert.equal(await b.evalJs(`document.getElementById('terms').hidden`), true);
   await noHints();
   assert.equal(await b.evalJs(`document.getElementById('pair').classList.contains('tight')`), true);
   assert.equal(await b.evalJs(`document.querySelectorAll('#pair .face').length`), 2);
-  assert.equal(await b.evalJs(`document.getElementById('pair').getAttribute('aria-label')`), "Held: Person 1, Person 2");
+  assert.equal(await b.evalJs(`document.getElementById('pair').getAttribute('aria-label')`), "Held: Person 1, Person 2, together");
+  for (const p of D.people) assert.equal(await count(p.id), String(filesWith((q) => q.includes(1) && q.includes(2) && q.includes(p.id)).length), `count beside ${p.id}`);
 
-  // tap the pair: any, unannounced; only the count says so
+  // tap the pair: like the filter icon, it swaps the views (the hold is untouched); again: back
+  const settle = () => b.until(`document.getAnimations().every((a) => a.playState !== 'running')`, 3000);
+  await settle();
   await tap("#pair");
-  const any12 = filesWith((p) => p.includes(1) || p.includes(2));
-  assert.equal(await text("peopleLabel"), `${any12.length} photos`);
-  assert.equal(await b.evalJs(STATS), stats(any12), "the header: any");
-  assert.deepEqual(await b.evalJs(NO_TEXT), ["any"], "the pill's line: any");
-  await noHints();
-  assert.equal(await hash(), "#p=1.2&any");
-  assert.deepEqual(await shown(), any12);
-  assert.equal(await b.evalJs(`document.getElementById('pair').classList.contains('apart')`), true);
-  for (const p of D.people) assert.equal(await count(p.id), String(filesWith((q) => q.includes(1) || q.includes(2) || q.includes(p.id)).length), `any count beside ${p.id}`);
+  assert.ok(await b.until(`!document.getElementById('filters').hidden && document.getElementById('list').hidden`), "the pair swaps to the filters");
+  assert.equal(await hash(), "#p=1.2", "the hold is untouched");
+  assert.equal(await b.evalJs(`document.getElementById('pair').className`), "pair tight", "still together");
+  await settle();
+  await tap("#pair");
+  assert.ok(await b.until(`!document.getElementById('list').hidden && document.getElementById('filters').hidden`), "and back to the faces");
+  await settle();
+  // folded, the pair opens the faces
+  await tap("#chev");
+  assert.ok(await b.until(`document.getElementById('list').hidden`));
+  await tap("#pair");
+  assert.ok(await b.until(`!document.getElementById('list').hidden`), "folded: the pair opens the faces");
+  await settle();
 
-  // back to together, then a face with no photo together with 1 and 2: a quiet empty state
-  await tap("#pair");
+  // a face with no photo together with 1 and 2: a quiet empty state
   assert.equal(await text("peopleLabel"), "9 photos");
   assert.equal(await count(12), "0");
   await face(12);
@@ -162,12 +169,13 @@ test("collapsed with someone held: one pill bottom-left with the faces, the filt
 test("the URL: a shared hold loads; unknown and malformed ids are dropped", async () => {
   await b.load(390, 844, true, "/example/#p=1.999.abc", READY);
   assert.deepEqual(await b.evalJs(`armful.state.picked`), [1]);
-  assert.equal(await b.evalJs(`armful.state.any`), false);
+  assert.equal(await b.evalJs(`'any' in armful.state`), false, "no any mode");
   assert.deepEqual(await shown(), filesWith((p) => p.includes(1)));
+  // an old link with &any loads as together
   await b.load(390, 844, true, "/example/#p=1.2&any", READY);
   assert.deepEqual(await b.evalJs(`armful.state.picked`), [1, 2]);
-  assert.equal(await b.evalJs(`armful.state.any`), true);
-  assert.equal(await text("peopleLabel"), `${filesWith((p) => p.includes(1) || p.includes(2)).length} photos`);
+  assert.deepEqual(await shown(), filesWith((p) => p.includes(1) && p.includes(2)));
+  assert.equal(await text("peopleLabel"), "9 photos");
   for (const h of ["#p=", "#p=999", "#zzz", "#p=..&&any"]) {
     await b.load(390, 844, true, "/example/" + h, READY);
     assert.deepEqual(await b.evalJs(`armful.state.picked`), [], h);

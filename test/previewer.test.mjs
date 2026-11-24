@@ -120,11 +120,11 @@ test("desktop: opens in the held set, counts files, steps, traps focus, Esc / Ba
   await b.key("Escape", 27);
 });
 
-test("the hold in the previewer: any, one held, nobody held", async () => {
+test("the hold in the previewer: two held (an old &any link: together), one held, nobody held", async () => {
   await b.load(1280, 900, false, "/example/#p=1.2&any", READY);
-  const any = filesWith((p) => p.includes(1) || p.includes(2));
+  const both = filesWith((p) => p.includes(1) && p.includes(2));
   await b.evalJs(`document.querySelector('.tile:not([hidden])').click()`);
-  assert.equal((await lb()).count, `1 / ${any.length}`);
+  assert.equal((await lb()).count, `1 / ${both.length}`);
   assert.equal(await b.evalJs(`document.getElementById('lbHold').textContent.trim()`), "");
   assert.equal(await b.evalJs(`document.querySelectorAll('#lbHold .face').length`), 2);
   await b.key("Escape", 27);

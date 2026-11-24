@@ -190,7 +190,8 @@ test("rail, hold, let go, previewer: no frame with a blank wall or stage", { tim
     await step("open the rail", () => tapSel("#people"));
     await step("hold 1", () => tapSel('#list .face[data-pid="1"]'));
     await step("hold 2", () => tapSel('#list .face[data-pid="2"]'));
-    await step("any", () => tapSel("#pair"));
+    await step("the pair: to the filters", () => tapSel("#pair"));
+    await step("the pair: back to the faces", () => tapSel("#pair"));
     await step("let go of 2", () => tapSel('#list .face[data-pid="2"]'));
     await step("clear", () => tapSel("#list .clearAll"));
     await step("fold the rail", () => tapSel("#people"));
