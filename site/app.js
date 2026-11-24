@@ -32,11 +32,11 @@
 
   // ---- the state, and what is on screen ----
   // phase: skeleton (the static first paint) | ready | error. picked / any: the hold (the URL's
-  // hash mirrors them). railOpen / moreOpen: the faces rail and its "+N more". lb: the previewer's
+  // hash mirrors them). railOpen: the faces rail. lb: the previewer's
   // place in lbSet (the files the wall showed when it opened), -1 when closed.
-  const state = { phase: "skeleton", picked: [], any: false, railOpen: false, moreOpen: false, lb: -1 };
+  const state = { phase: "skeleton", picked: [], any: false, railOpen: false, lb: -1 };
   let lbSet = [];
-  const drawn = { phase: "skeleton", filter: "", rail: false, more: false, lb: -1, lbSet: null };
+  const drawn = { phase: "skeleton", filter: "", rail: false, lb: -1, lbSet: null };
 
   // ---- picture URLs: data.json's `thumbs` templates win (the test fixture, other hosts) ----
   // a wall thumbnail `width` wide
@@ -193,7 +193,7 @@
   // ---- people: one pill bottom-left; it opens a narrow rail of faces up the left edge ----
   const BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   let byId = new Map();
-  let peopleN = 0; // people shown in the list (not the +N more)
+  let peopleN = 0; // people in the list: everyone data.json names
   const faceEls = new Map(); // person id -> { btn, b, li } in the list
   let faceIo = null;
   // a face picture: Google's server crop, or for a rotated photo (Google crops the raw, unrotated
@@ -235,10 +235,9 @@
       setAttr(e.btn, "aria-label", `Person ${pid}, ${nf(n)} photos`);
       if (n === 0) zero.add(pid);
     }
-    for (const ol of [$("listMain"), $("listMore")]) {
-      const want = [...ol.children].sort((a, c) => (zero.has(+a.dataset.pid) - zero.has(+c.dataset.pid)) || a.dataset.k - c.dataset.k);
-      if (want.some((li, k) => ol.children[k] !== li)) ol.append(...want);
-    }
+    const ol = $("listMain");
+    const want = [...ol.children].sort((a, c) => (zero.has(+a.dataset.pid) - zero.has(+c.dataset.pid)) || a.dataset.k - c.dataset.k);
+    if (want.some((li, k) => ol.children[k] !== li)) ol.append(...want);
   }
   // the rail: open or folded (a public helper for the tests and the pill)
   function panelOpen(open) { state.railOpen = !!open; render(); }
@@ -248,28 +247,20 @@
     setAttr($("people"), "aria-expanded", String(open));
     document.body.classList.toggle("panelOpen", open);
   }
-  function drawMore() {
-    $("listMore").hidden = !state.moreOpen;
-    setAttr($("more"), "aria-expanded", String(state.moreOpen));
-  }
   function buildPeople() {
     byId = new Map(D.people.map((p) => [p.id, p]));
-    const main = D.people.filter((p) => !p.x), rest = D.people.filter((p) => p.x);
+    const main = D.people;
     // faces in the list load only once it is open, a little ahead of the scroll inside it
     faceIo = new IntersectionObserver((es) => {
       for (const e of es) if (e.isIntersecting) { faceIo.unobserve(e.target); paintFace(e.target.firstChild, byId.get(+e.target.dataset.pid)); }
     }, { root: $("list"), rootMargin: "200px 0px" });
     const fillList = (ol, ps) => ol.append(...ps.map((p, k) => { const li = faceEl(p); li.dataset.pid = p.id; li.dataset.k = k; return li; }));
     fillList($("listMain"), main);
-    fillList($("listMore"), rest);
-    $("more").hidden = !rest.length;
-    $("more").textContent = `+${nf(rest.length)} more`;
     peopleN = main.length;
     // the collapsed pill's three faces load with the page, in the places of the skeleton's discs
     $("people").querySelector(".stack").replaceChildren(...[...main].sort((a, c) => c.n - a.n).slice(0, 3).map((p) => { const i = faceImg(); paintFace(i, p); return i; }));
 
     $("people").onclick = () => panelOpen(!state.railOpen);
-    $("more").onclick = () => { state.moreOpen = !state.moreOpen; render(); };
     // the rail stays open while the wall scrolls and taps through; only the pill or Esc folds it
     // (an Esc the previewer already took is not ours)
     addEventListener("keydown", (e) => {
@@ -337,7 +328,7 @@
     // the pill carries no words; its label (for screen readers) and the header say the numbers
     setText($("peopleLabel"), k ? plural(shownN, "photo") : `${nf(peopleN)} people`);
     setAttr($("people"), "aria-label", k ? `People filter, ${nf(k)} held, ${plural(shownN, "photo")}` : `People filter, ${nf(peopleN)} people`);
-    // the header follows the wall: the files shown, and everyone (main list and +N more) in them
+    // the header follows the wall: the files shown, and everyone in the list who is in them
     let inShown = 0;
     for (const pid of tally.keys()) if (byId.has(pid)) inShown++;
     setText($("stats"), `${nf(inShown)} ${inShown === 1 ? "person" : "people"} · ${plural(shownN, "photo")}`);
@@ -393,7 +384,7 @@
     an.onfinish = done; an.oncancel = done;
   }
   function buildHold() {
-    for (const ol of [$("listMain"), $("listMore")]) ol.addEventListener("click", (e) => {
+    $("listMain").addEventListener("click", (e) => {
       const btn = e.target.closest(".face");
       if (!btn) return;
       const pid = +btn.dataset.pid, adding = !state.picked.includes(pid);
@@ -586,7 +577,6 @@
     if (state.phase !== "ready") return;
     const f = filterKey();
     if (f !== drawn.filter) { drawn.filter = f; drawFilter(); }
-    if (state.moreOpen !== drawn.more) { drawn.more = state.moreOpen; drawMore(); }
     if (state.railOpen !== drawn.rail) { drawn.rail = state.railOpen; drawRail(); }
     if (state.lb >= 0) lastK = state.lb;
     if (state.lb !== drawn.lb || (state.lb >= 0 && lbSet !== drawn.lbSet)) drawLb();
@@ -649,6 +639,12 @@
     d.files.forEach((f, k) => { if (okFile(f)) { at.set(k, files.length); files.push(f); } });
     const people = (d.people || []).filter(okPerson);
     const skipped = d.files.length - files.length + (d.people || []).length - people.length;
+    // uncertain people (x, kept only by a debugging build) are not shown, counted or filtered on
+    const unsure = new Set(people.filter((p) => p.x).map((p) => p.id));
+    if (unsure.size) {
+      for (const f of files) f.p = f.p.filter((i) => !unsure.has(i));
+      people.splice(0, people.length, ...people.filter((p) => !unsure.has(p.id)));
+    }
     if (!files.length) return null;
     for (const p of people) {
       if (p.rep == null) continue;

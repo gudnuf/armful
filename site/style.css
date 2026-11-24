@@ -153,8 +153,6 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .list li { display: flex; align-items: center; gap: 6px; }
 .list .face img { box-shadow: 0 1px 4px rgba(13, 15, 14, .28); }
 .list .face.held img { box-shadow: 0 0 0 2.5px var(--ground), 0 0 0 5px var(--ring); }
-.list .more { align-self: flex-start; min-height: 32px; padding: 0 10px; background: var(--veil); color: var(--text);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .count { font: 600 13px/20px var(--sans); font-variant-numeric: tabular-nums; min-width: 28px; padding: 0 7px; border-radius: 999px;
   text-align: center; background: var(--text); color: var(--ground); transition: opacity var(--fade); }
 .face.dim + .count { opacity: .3; }

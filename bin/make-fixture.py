@@ -10,7 +10,7 @@ page at those local files instead of Drive.
 Shape (the page tests rely on it):
   60 files, sizes 4:3, 3:4, 16:9, 1:1; 3 of them videos (v: 1), files 0, 22, 26;
   12 people, ids 1-12, n descending (n = files containing them);
-  people 11 and 12 carry x: 1; people 1 and 2 share exactly 9 files;
+  no x (the pipeline leaves uncertain people out); people 1 and 2 share exactly 9 files;
   person 12 shares none with person 1; no bursts;
   tz "UTC"; t (unix seconds) on 58 files, strictly ascending in file order,
   over 4 days in a morning and an evening cluster each; files 58 and 59 have
@@ -31,7 +31,6 @@ SIZES = [(1600, 1200), (1200, 1600), (1920, 1080), (1200, 1200)]  # 4:3, 3:4, 16
 # files per person, ids 1..12, strictly descending
 COUNTS = [30, 26, 22, 19, 16, 13, 11, 9, 7, 5, 3, 2]
 SHARED_1_2 = 9
-EXTRA = {11, 12}  # the "x: 1" people
 VIDEOS = (0, 22, 26)  # the page tests rely on file 0 being a video
 EMPTY = {6, 15, 24, 33, 42, 51}  # no people, no faces
 GROUP = {10, 27, 45, 57}  # group shots: 8+ faces, most of them nobody the page names
@@ -99,8 +98,6 @@ def main(out_dir):
         f = random.choice(mine)
         w, h = files[f]["w"], files[f]["h"]
         p = dict(id=pid, n=len(mine), nv=sum(1 for i in mine if i in videos))
-        if pid in EXTRA:
-            p["x"] = 1
         p["rep"] = dict(f=f, box=[0, 0, min(w, h)], sz=400, c=1)
         people.append(p)
     people.sort(key=lambda q: (-q["n"], q["id"]))

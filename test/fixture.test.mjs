@@ -27,7 +27,7 @@ test("make-fixture writes the synthetic collection", () => {
   assert.deepEqual(people.map((p) => p.id).sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   for (let k = 1; k < people.length; k++) assert.ok(people[k - 1].n >= people[k].n, "n descending");
   assert.ok(people[0].n >= people[1].n);
-  assert.deepEqual(people.filter((p) => p.x === 1).map((p) => p.id).sort((a, b) => a - b), [11, 12]);
+  assert.ok(people.every((p) => !("x" in p)), "clear people only, as the pipeline writes them");
   assert.equal(files.filter((f) => f.p.includes(1) && f.p.includes(2)).length, 9);
   assert.equal(files.filter((f) => f.p.includes(1) && f.p.includes(12)).length, 0);
   assert.equal(files.filter((f) => f.v).length, 3);

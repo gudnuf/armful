@@ -31,12 +31,7 @@ const openList = async () => {
   if (!(await visible("#list"))) await tap("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`), "list open");
 };
-const openMore = async () => {
-  await openList();
-  if (!(await visible("#listMore"))) await tap("#more");
-  assert.ok(await b.until(`document.getElementById('listMore').getClientRects().length > 0`), "more open");
-};
-const face = async (pid) => { await openList(); if (D.people.find((p) => p.id === pid).x) await openMore(); await tap(`#list .face[data-pid="${pid}"]`); };
+const face = async (pid) => { await openList(); await tap(`#list .face[data-pid="${pid}"]`); };
 const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
 // no hint anywhere in the panel (the empty state's one plain sentence is checked on its own)
 const noHints = async () => assert.doesNotMatch(await b.evalJs(`document.getElementById('panel').textContent`), NO_HINTS);
@@ -136,7 +131,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal((await shown()).length, 60);
   assert.equal(await visible("#pair"), false);
   assert.equal(await visible("#clear"), false);
-  assert.equal(await text("peopleLabel"), "10 people");
+  assert.equal(await text("peopleLabel"), "12 people");
   assert.equal(await text("stats"), "12 people · 60 photos", "cleared: the whole collection again");
   for (const p of D.people) assert.equal(await count(p.id), String(p.n));
 });

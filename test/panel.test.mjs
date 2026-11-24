@@ -5,6 +5,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
@@ -74,10 +76,10 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
   assert.ok(bar.width < 260, `pill is ${bar.width}px wide`);
   const pill = await rect("#people");
   assert.ok(pill.height >= 44, `pill button is ${pill.height}px tall`);
-  assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "10 people", "said to screen readers");
-  assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-label')`), "People filter, 10 people");
+  assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "12 people", "said to screen readers");
+  assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-label')`), "People filter, 12 people");
   assert.deepEqual(await b.evalJs(NO_TEXT), [], "the pill shows no words");
-  assert.equal(await b.evalJs(`document.getElementById('more').textContent.trim()`), "+2 more");
+  assert.equal(await b.evalJs(`document.querySelector('#more, #listMore, #list button:not(.face)')`), null, "one list, no +N more");
   assert.equal(await visible("#pair"), false);
   assert.equal(await visible("#clear"), false);
   // the stack's three faces load with the page; the list's only when it opens
@@ -105,8 +107,8 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
     pid: +li.querySelector('.face').dataset.pid, count: li.querySelector('.count').textContent, label: li.querySelector('.face').getAttribute('aria-label'),
     s: li.querySelector('.face img').getBoundingClientRect().width, h: li.querySelector('.face').getBoundingClientRect().height }))`);
   const people = await b.evalJs(`armful.D.people`);
-  assert.equal(rows.length, 10);
-  assert.deepEqual(rows.map((r) => r.pid).sort((x, y) => x - y), people.filter((p) => !p.x).map((p) => p.id).sort((x, y) => x - y));
+  assert.equal(rows.length, 12, "everyone data.json names");
+  assert.deepEqual(rows.map((r) => r.pid).sort((x, y) => x - y), people.map((p) => p.id).sort((x, y) => x - y));
   for (const r of rows) {
     const p = people.find((q) => q.id === r.pid);
     assert.equal(r.count, String(p.n), `person ${r.pid}`);
@@ -115,15 +117,13 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
     assert.ok(r.h >= 44, "44px tap target");
   }
 
-  await tap("#more");
-  assert.ok(await b.until(`document.getElementById('listMore').getClientRects().length > 0`), "+2 more opens");
-  assert.equal(await b.evalJs(`document.querySelectorAll('#listMore li').length`), 2);
+  // the whole list scrolls inside the rail, between the top and the pill
   assert.equal(await b.evalJs(`getComputedStyle(document.getElementById('list')).overflowY`), "auto");
   const tall = await rect("#list");
   assert.ok(tall.top >= 0 && tall.bottom <= (await rect("#bar")).top + 1, `the rail fits between the top and the pill: ${JSON.stringify(tall)}`);
   assert.ok(tall.width <= 110, `still narrow: ${tall.width}px`);
   await sleep(500);
-  assert.ok(same(pill, await rect("#people")), "pill still in place after +more");
+  assert.ok(same(pill, await rect("#people")), "pill still in place");
 
   await b.key("Escape", 27);
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length === 0`), "Esc folds it");
@@ -189,6 +189,29 @@ test("updateCounts writes every count and dims the zeros", async () => {
     const c = (pid) => document.querySelector('.count[data-pid="' + pid + '"]').textContent;
     return { c3: c(3), d3: f(3).classList.contains('dim'), c12: c(12), d12: f(12).classList.contains('dim'), l12: f(12).getAttribute('aria-label') }; })()`);
   assert.deepEqual(out, { c3: "0", d3: true, c12: "1,200", d12: false, l12: "Person 12, 1,200 photos" });
+});
+
+test("uncertain people (x, from a debugging build) are ignored: not listed, not counted, not on any photo", async () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "armful-x-"));
+  try {
+    const fx = join(ROOT, "test", "fixture");
+    const d = JSON.parse(readFileSync(join(fx, "data.json"), "utf8"));
+    // person 99, uncertain, on the first ten files (some of them otherwise empty)
+    d.people.push({ id: 99, n: 10, nv: 0, x: 1, rep: { f: 0, box: [0, 0, 100], sz: 400, c: 1 } });
+    d.files.slice(0, 10).forEach((f) => f.p.push(99));
+    writeFileSync(join(dir, "data.json"), JSON.stringify(d));
+    cpSync(join(fx, "fx"), join(dir, "fx"), { recursive: true });
+    const s2 = await serve({ fixture: dir });
+    try {
+      await b.navigate(`${s2.url}/example/`);
+      assert.ok(await b.until(READY), "page ready");
+      assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
+      assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "12 people");
+      assert.equal(await b.evalJs(`document.querySelector('.face[data-pid="99"]')`), null);
+      assert.equal(await b.evalJs(`armful.D.people.some((p) => p.id === 99 || p.x)`), false);
+      assert.equal(await b.evalJs(`armful.D.files.some((f) => f.p.includes(99))`), false);
+    } finally { await s2.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("nothing threw", () => assert.deepEqual(errors, []));
