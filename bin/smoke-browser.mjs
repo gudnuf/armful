@@ -120,15 +120,15 @@ async function viewport(b, ev, [w, h, mobile]) {
     if (!ok) return;
   } catch (e) { check(`${tag} wall`, false, scrub(e.message)); return; }
 
-  // the slim header: the wordmark and "N people · N photos"
+  // the slim header: the wordmark and icon counts; the words live in aria-label "N people · N photos[ · N videos]"
   step("header");
   try {
     const h = await b.evalJs(`(() => { const m = document.querySelector('.masthead'); return { mark: !!m?.querySelector('.mark svg'),
-      text: (document.getElementById('stats')?.textContent || '').trim() }; })()`);
-    const m = h.text.match(/^([\d,.\s]+) (?:people|person) · ([\d,.\s]+) photos?$/);
-    const photos = m ? +m[2].replace(/\D/g, "") : -1;
+      text: (document.getElementById('stats')?.getAttribute('aria-label') || '').trim() }; })()`);
+    const m = h.text.match(/^([\d,.\s]+) (?:people|person) · ([\d,.\s]+) photos?(?: · ([\d,.\s]+) videos?)?$/);
+    const photos = m ? +m[2].replace(/\D/g, "") + (m[3] ? +m[3].replace(/\D/g, "") : 0) : -1;
     check(`${tag} header: wordmark and "${h.text}"`, h.mark && !!m && +m[1].replace(/\D/g, "") > 0 && photos === N,
-      `wordmark ${h.mark}, stats ${js(h.text)}, want ${N} photos`);
+      `wordmark ${h.mark}, stats ${js(h.text)}, want ${N} files (photos + videos)`);
   } catch (e) { check(`${tag} header`, false, scrub(e.message)); }
 
   // the first screen of thumbnails
