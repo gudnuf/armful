@@ -1,6 +1,6 @@
 // The door: the password page for one collection, served by the gate middleware.
-// Self-contained (inline CSS and wordmark, no fonts, no script beyond the hash
-// carry-over and photo fallback) so it renders with nothing else loaded. No words on it except
+// Self-contained (inline CSS and wordmark, no fonts, one small inline script: the in-place
+// submit below, the hash carry-over and photo fallback) so it renders with nothing else loaded. No words on it except
 // the field's "password" placeholder (beside a lock glyph), aria-labels and the screen-reader
 // alert after a wrong try. The form has a fixed height, so a slow, streamed first paint (the
 // mark before the field) moves nothing.
@@ -14,17 +14,49 @@ const MARK = `<svg class="mark" viewBox="0 0 2987 802" width="88" height="24" ro
 export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><style>path{fill:#16231F}@media (prefers-color-scheme:dark){path{fill:#F2EFE8}}</style><path fill="#16231F" d="M35.3 228.2C35.3 350.1 134.1 448.9 256 448.9C302.6 448.9 345.9 434.4 381.5 409.7V440.4H476.7V98.1H381.5V194Q387.2 198.1 392.2 203.1Q403.9 214.8 410.4 230.1Q417 245.8 417 263.1Q417 280.3 410.4 296.1Q403.9 311.3 392.2 323Q380.5 334.7 365.3 341.1Q349.5 347.8 332.3 347.8Q322.1 347.8 312.5 345.5C295.5 354.5 276.3 359.5 256 359.5C235.7 359.5 216.5 354.5 199.5 345.5Q189.9 347.8 179.7 347.8Q162.5 347.8 146.7 341.1Q131.5 334.7 119.8 323Q108.1 311.3 101.6 296.1Q95 280.3 95 263.1Q95 245.8 101.6 230.1Q108.1 214.8 119.8 203.1Q124.8 198.1 130.5 194V98.1H35.3ZM323.8 130.9C323.8 93.5 293.4 63.1 256 63.1C218.6 63.1 188.2 93.5 188.2 130.9C188.2 168.4 218.6 198.7 256 198.7C293.4 198.7 323.8 168.4 323.8 130.9ZM400.1 263.1C400.1 225.6 369.7 195.3 332.3 195.3C294.8 195.3 264.5 225.6 264.5 263.1C264.5 300.5 294.8 330.9 332.3 330.9C369.7 330.9 400.1 300.5 400.1 263.1ZM247.5 263.1C247.5 225.6 217.2 195.3 179.7 195.3C142.3 195.3 111.9 225.6 111.9 263.1C111.9 300.5 142.3 330.9 179.7 330.9C217.2 330.9 247.5 300.5 247.5 263.1Z"/></svg>`;
 const FAVICON = "data:image/svg+xml," + encodeURIComponent(FAVICON_SVG);
 
-// the door's only script: carry the URL hash into the form, and drop the photo
-// if it fails (the ink ground shows). Its hash pins it in the CSP; test/gate.test.mjs
-// recomputes the hash from SCRIPT, so editing one without the other fails the test.
-export const SCRIPT = 'document.getElementById("to").value=location.hash;var h=document.querySelector(".hero");if(h){if(h.complete&&!h.naturalWidth)h.remove();else h.addEventListener("error",function(){h.remove()})}';
-export const SCRIPT_HASH = "sha256-9wlUc28uCxLW+iSa8y3ssiyLA46mVGiRxRkXJjSiops=";
+// the door's only script. Without it the form is a plain POST (303 in, or a 401 door that
+// shakes). With it the same POST goes by fetch, asking for JSON: a wrong password shakes the
+// field in place (no reload), selects it for retyping and fills the live region; a right one
+// replaces this document with the collection (a cross-document view transition where the
+// browser has them). Anything else (413, 503, a network error) falls back to the native POST.
+// It also carries the URL hash into the form and drops the photo if it fails (the ink ground
+// shows). Its hash pins it in the CSP; test/gate.test.mjs recomputes the hash from SCRIPT, so
+// editing one without the other fails the test.
+export const SCRIPT = `(function(){
+var d=document,f=d.querySelector("form.door"),i=f.querySelector("input[type=password]"),t=d.getElementById("to"),
+b=f.querySelector("button"),a=d.getElementById("wrong"),h=d.querySelector(".hero"),busy=false;
+t.value=location.hash;
+if(h){if(h.complete&&!h.naturalWidth)h.remove();else h.addEventListener("error",function(){h.remove()})}
+if(!window.fetch||!window.URLSearchParams||!window.FormData)return;
+function idle(){busy=false;b.disabled=false;f.removeAttribute("aria-busy")}
+function wrong(){
+f.classList.remove("wrong");void f.offsetWidth;f.classList.add("wrong");
+i.setAttribute("aria-invalid","true");i.setAttribute("aria-describedby","wrong");
+a.textContent="Wrong password. Try again.";i.focus();i.select()}
+function go(to){
+var u=new URL(to,location.href);if(u.origin!==location.origin)throw 0;
+if(u.pathname+u.search===location.pathname+location.search)history.replaceState(history.state,"",location.pathname+"?");
+location.replace(u.href)}
+addEventListener("pageshow",idle);
+i.addEventListener("input",function(){i.removeAttribute("aria-invalid")});
+f.addEventListener("submit",function(e){
+e.preventDefault();if(busy)return;
+busy=true;b.disabled=true;f.setAttribute("aria-busy","true");a.textContent="";t.value=location.hash;
+fetch(f.action,{method:"POST",body:new URLSearchParams(new FormData(f)),credentials:"same-origin",
+redirect:"manual",cache:"no-store",headers:{Accept:"application/json"}}).then(function(r){
+if(r.status===401){idle();wrong();return}
+if(r.status!==200)throw 0;
+return r.json().then(function(j){go(j.to)})
+}).catch(function(){f.submit()})})
+})()`;
+export const SCRIPT_HASH = "sha256-k90lN+H5AvmL2DtRhyBDDJH+wy2NrCz1PC80NIAySY8=";
 export const CSP = [
   "default-src 'none'",
   "img-src https://drive.google.com https://*.googleusercontent.com data:",
   "font-src 'self'",
   "style-src 'unsafe-inline'",
   `script-src '${SCRIPT_HASH}'`,
+  "connect-src 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
@@ -116,7 +148,13 @@ button{all:unset;box-sizing:border-box;flex:none;width:44px;height:44px;border-r
   transition:transform 120ms cubic-bezier(.2,0,0,1)}
 button:active{transform:scale(.94)}
 button:focus-visible{outline:2.5px solid #16231F;outline-offset:2px}
+button:disabled{cursor:default}
 .wrong .field{animation:shake .4s cubic-bezier(.2,0,0,1)}
+/* in flight (the script's fetch, the server's 800 ms on a wrong try): the arrow dims and breathes */
+.door[aria-busy=true] button{opacity:.7;animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45;transform:scale(.92)}}
+/* same-origin navigations cross-fade (into the collection, when it opts in too) */
+@view-transition{navigation:auto}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 @keyframes shake{20%{transform:translateX(-8px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(3px)}}
 @media (min-width:1000px){body{--pb:64px;--pl:max(48px,env(safe-area-inset-left))}form{max-width:480px}.mark{top:40px}.cover{bottom:calc(var(--pb) + 56px + 28px)}}
@@ -134,7 +172,7 @@ ${cover}
     <button type="submit" aria-label="Enter"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
   </div>
-  ${wrong ? '<p class="sr" id="wrong" role="alert">Wrong password. Try again.</p>' : ""}
+  <p class="sr" id="wrong" role="alert">${wrong ? "Wrong password. Try again." : ""}</p>
 </form>
 <script>${SCRIPT}</script>
 </body></html>`;

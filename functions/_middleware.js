@@ -154,20 +154,20 @@ export async function onRequest({ request, env, next }) {
     const p = form.get("p") || "";
     let to = form.get("to") || "";
     if (to.length > MAX_TO || !/^#[\w=.&,-]*$/.test(to)) to = "";
+    // the door's script asks for JSON (Accept: application/json): the same checks, the same
+    // cookie and the same delay, answered as data so the page can stay put on a wrong try
+    const asJson = /\bapplication\/json\b/i.test(request.headers.get("Accept") || "");
+    const base = { "Cache-Control": "private, no-store", "Vary": "Cookie, Accept", "X-Robots-Tag": NOINDEX, "Referrer-Policy": "no-referrer" };
+    const json = (status, obj, extra = {}) => new Response(JSON.stringify(obj), {
+      status, headers: { "Content-Type": "application/json; charset=utf-8", ...base, ...extra },
+    });
     if (p && same(await token(p, label), want)) {
-      return new Response(null, {
-        status: 303,
-        headers: {
-          Location: `/${slug}/` + to,
-          "Set-Cookie": `${name}=${want}; Path=/${slug}; Max-Age=${DAYS * 86400}; HttpOnly; Secure; SameSite=Lax`,
-          "Cache-Control": "private, no-store",
-          "Vary": "Cookie",
-          "X-Robots-Tag": NOINDEX,
-          "Referrer-Policy": "no-referrer",
-        },
-      });
+      const cookie = `${name}=${want}; Path=/${slug}; Max-Age=${DAYS * 86400}; HttpOnly; Secure; SameSite=Lax`;
+      if (asJson) return json(200, { ok: true, to: `/${slug}/` + to }, { "Set-Cookie": cookie });
+      return new Response(null, { status: 303, headers: { Location: `/${slug}/` + to, "Set-Cookie": cookie, ...base, "Vary": "Cookie" } });
     }
     await new Promise((r) => setTimeout(r, 800)); // slow down guessing
+    if (asJson) return json(401, { ok: false });
     return door(401, true, await doorOpts(env, request, slug));
   }
 

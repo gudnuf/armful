@@ -5,23 +5,19 @@
 // No real data: the door photo id is a placeholder.
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, symlinkSync, rmSync, readdirSync, readFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { rmSync, readdirSync, readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { door, SCRIPT, SCRIPT_HASH, CSP, FAVICON_SVG } from "../functions/_door.js";
 import { PAGE_CSP } from "../functions/_middleware.js";
+import { makeWork, start as startPages, stop, key } from "./wrangler.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const WRANGLER = "wrangler@4.167.0"; // pinned: same version every run, cached after the first
 const SLUG = "bnf-ytt-spain-2026";
 const OTHER = "other-coll"; // a second collection: the SAME password, no door.json
 const WEAK = "weak-coll"; // a third collection whose secret is too short
-const key = (slug) => "COLLECTION_" + "PASSWORD_" + slug.toUpperCase().replace(/-/g, "_");
 const PASS = ["correct", "horse", "battery", "staple"].join(" ");
 const PAGE_MARK = '<script src="app.'; // only the real collection page has it, never the door
 const DATA_CANARY = "DATACANARYFILEID0123"; // a file id only data.json carries: never on the door
@@ -31,73 +27,14 @@ const T = { timeout: 60000 }; // per test
 const REQ_MS = 15000; // per request
 
 let WORK; // temp project dir: functions -> repo functions, dist/, .dev.vars
-let server = null;
-
-function freePort() {
-  return new Promise((res, rej) => {
-    const s = createServer();
-    s.unref();
-    s.on("error", rej);
-    s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => res(port)); });
-  });
-}
-
-function killNow() { // sync, for process exit
-  if (!server) return;
-  try { process.kill(-server.proc.pid, "SIGKILL"); } catch {}
-  try { server.proc.kill("SIGKILL"); } catch {}
-}
-process.on("exit", killNow);
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { killNow(); process.exit(1); });
-
-// kill the whole wrangler process group and wait until it has exited
-async function stop() {
-  if (!server) return;
-  const { proc } = server;
-  const gone = proc.exitCode !== null || proc.signalCode !== null
-    ? Promise.resolve() : new Promise((r) => proc.once("exit", r));
-  killNow();
-  server = null;
-  await gone;
-  // workerd children are in the same group; give the kernel a beat to reap them
-  for (let i = 0; i < 20; i++) {
-    try { process.kill(-proc.pid, 0); } catch { return; }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-}
-
-// start wrangler with these secrets ({} = none configured)
-async function start(secrets) {
-  await stop();
-  rmSync(join(WORK, ".dev.vars"), { force: true });
-  // values reach wrangler only through this temp file, never a tracked file
-  const lines = Object.entries(secrets).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-  if (lines.length) writeFileSync(join(WORK, ".dev.vars"), lines.join("\n") + "\n");
-  const port = await freePort();
-  const env = { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" };
-  for (const k of Object.keys(env)) if (k.startsWith("COLLECTION_" + "PASSWORD_")) delete env[k];
-  const proc = spawn("npx", ["--yes", WRANGLER, "pages", "dev", "dist", "--port", String(port), "--ip", "127.0.0.1",
-    "--compatibility-date=2026-01-01", "--show-interactive-dev-session=false"],
-    { cwd: WORK, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-  server = { proc, base: `http://127.0.0.1:${port}` };
-  let log = "";
-  await new Promise((res, rej) => {
-    const timer = setTimeout(() => rej(new Error("wrangler did not start:\n" + log)), 150000);
-    const on = (d) => {
-      log += d;
-      if (/Ready on http:\/\/127\.0\.0\.1:\d+/.test(log)) { clearTimeout(timer); res(); }
-    };
-    proc.stdout.on("data", on);
-    proc.stderr.on("data", on);
-    proc.once("exit", () => { clearTimeout(timer); rej(new Error("wrangler exited:\n" + log)); });
-  });
-}
+let base; // the running wrangler
+const start = async (secrets) => { base = await startPages(WORK, secrets); };
 
 const get = (path, headers = {}, method = "GET") =>
-  fetch(server.base + path, { method, redirect: "manual", headers, signal: AbortSignal.timeout(REQ_MS) });
+  fetch(base + path, { method, redirect: "manual", headers, signal: AbortSignal.timeout(REQ_MS) });
 // raw HTTP, so the path reaches the server byte for byte (fetch would normalise it)
 const raw = (path, method = "GET", headers = {}, body = null) => new Promise((res, rej) => {
-  const u = new URL(server.base);
+  const u = new URL(base);
   const req = httpRequest({ host: u.hostname, port: u.port, path, method, headers, timeout: REQ_MS }, (r) => {
     let b = ""; r.setEncoding("utf8"); r.on("data", (d) => { b += d; });
     r.on("end", () => res({ status: r.statusCode, headers: r.headers, body: b }));
@@ -106,7 +43,7 @@ const raw = (path, method = "GET", headers = {}, body = null) => new Promise((re
   req.on("error", rej);
   req.end(body);
 });
-const post = (slug, fields) => fetch(server.base + `/${slug}/__gate`, {
+const post = (slug, fields) => fetch(base + `/${slug}/__gate`, {
   method: "POST", redirect: "manual", signal: AbortSignal.timeout(REQ_MS),
   headers: { "Content-Type": "application/x-www-form-urlencoded" },
   body: new URLSearchParams(fields).toString(),
@@ -116,22 +53,8 @@ const cookieOf = (r) => (r.headers.get("set-cookie") || "").split(";")[0];
 const notJson = (body) => { try { JSON.parse(body); return false; } catch { return true; } };
 
 before(() => {
-  WORK = mkdtempSync(join(tmpdir(), "armful-gate-"));
-  symlinkSync(join(ROOT, "functions"), join(WORK, "functions"));
-  const fx = join(WORK, "fixture");
-  execFileSync("python3", ["-I", join(ROOT, "bin", "make-fixture.py"), fx]);
-  const cols = [[SLUG, { title: TITLE, door_photo: "PLACEHOLDER_DOOR_ID", door_position: "center 30%" }], [OTHER, {}], [WEAK, {}]];
-  const args = [join(ROOT, "bin", "build-dist.mjs"), "--out", join(WORK, "dist")];
-  for (const [slug, extra] of cols) {
-    const col = join(WORK, "collections", slug);
-    mkdirSync(join(col, "dist"), { recursive: true });
-    writeFileSync(join(col, "collection.json"), JSON.stringify({ slug, ...extra }));
-    const data = JSON.parse(readFileSync(join(fx, "data.json"), "utf8"));
-    if (slug === SLUG) data.files[0].i = DATA_CANARY;
-    writeFileSync(join(col, "dist", "data.json"), JSON.stringify(data));
-    args.push("--collection", col);
-  }
-  execFileSync(process.execPath, args, { cwd: WORK, stdio: "ignore" });
+  WORK = makeWork([[SLUG, { title: TITLE, door_photo: "PLACEHOLDER_DOOR_ID", door_position: "center 30%" },
+    (data) => { data.files[0].i = DATA_CANARY; return data; }], [OTHER], [WEAK]]);
   const app = readdirSync(join(WORK, "dist", SLUG)).find((n) => /^app\.[0-9a-f]{10}\.js$/.test(n));
   ASSET = `/${SLUG}/${app}`;
   ASSET_HEAD = readFileSync(join(WORK, "dist", SLUG, app), "utf8").slice(0, 120);
@@ -195,6 +118,16 @@ describe("door() markup, no server", () => {
     const html = await door(401, true, { slug: SLUG }).text();
     assert.match(html, /<p class="sr" id="wrong" role="alert">Wrong password\. Try again\.<\/p>/);
     assert.match(html, /<input type="password"[^>]*aria-describedby="wrong"/);
+  });
+
+  test("live region always present (empty until a wrong try); fetch allowed by connect-src; view transition opt-in", async () => {
+    const ok = await door(401, false, { slug: SLUG }).text();
+    assert.match(ok, /<p class="sr" id="wrong" role="alert"><\/p>/);
+    assert.doesNotMatch(ok.match(/<input type="password"[^>]*>/)[0], /aria-describedby|aria-invalid/);
+    assert.match(ok, /@view-transition\{navigation:auto\}/);
+    assert.match(ok, /\.door\[aria-busy=true\] button\{[^}]*animation:pulse/);
+    assert.match(CSP, /(^|; )connect-src 'self'(;|$)/);
+    assert.match(CSP, /(^|; )default-src 'none'(;|$)/);
   });
 
   test("the cover: name and dates as escaped text, og:title from the name; omitted when absent or unusable", async () => {
@@ -399,6 +332,55 @@ describe("with secrets set", () => {
     assert.equal(data.status, 200);
     assert.equal(JSON.parse(await data.text()).files.length, 61); // the fixture: 60 files + 1 malformed
     assert.equal(data.headers.get("cache-control"), "private, no-cache");
+  });
+
+  // the door's script: the same POST with Accept: application/json, answered as data
+  const gateJson = (p, to = "", accept = "application/json") => fetch(base + `/${SLUG}/__gate`, {
+    method: "POST", redirect: "manual", signal: AbortSignal.timeout(REQ_MS),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: accept },
+    body: new URLSearchParams({ p, to }).toString(),
+  });
+
+  test("JSON variant, wrong password: still slow, 401 with a small JSON body, no cookie, no door", T, async () => {
+    for (const accept of ["application/json", "application/json, text/plain;q=0.5"]) {
+      const t0 = Date.now();
+      const r = await gateJson("not the password", "#p=3", accept);
+      assert.ok(Date.now() - t0 >= 700, `took ${Date.now() - t0}ms`);
+      assert.equal(r.status, 401);
+      assert.equal(r.headers.get("set-cookie"), null);
+      assert.match(r.headers.get("content-type") || "", /^application\/json/);
+      assert.match(r.headers.get("cache-control") || "", /private, no-store/);
+      assert.match(r.headers.get("vary") || "", /Cookie/);
+      assert.match(r.headers.get("x-robots-tag") || "", /noindex/);
+      assert.equal(r.headers.get("location"), null);
+      assert.deepEqual(JSON.parse(await r.text()), { ok: false });
+    }
+  });
+
+  test("JSON variant, right password: 200 with the target and the same cookie, no redirect", T, async () => {
+    const r = await gateJson(PASS, "#p=3");
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("location"), null);
+    assert.deepEqual(JSON.parse(await r.text()), { ok: true, to: `/${SLUG}/#p=3` });
+    assert.match(r.headers.get("cache-control") || "", /private, no-store/);
+    const sc = r.headers.get("set-cookie") || "";
+    assert.equal(sc, (await gate(PASS)).headers.get("set-cookie"), "the same cookie as the form POST");
+    assert.match(sc, /HttpOnly; Secure; SameSite=Lax/);
+    assert.equal((await get(`/${SLUG}/data.json`, { Cookie: cookieOf(r) })).status, 200);
+    // unsafe hashes are dropped the same way
+    assert.equal(JSON.parse(await (await gateJson(PASS, "//evil.example")).text()).to, `/${SLUG}/`);
+  });
+
+  test("JSON variant keeps the limits: 413 over 4 KB, 503 without a secret, 405 on GET", T, async () => {
+    const big = await fetch(base + `/${SLUG}/__gate`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(REQ_MS),
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({ p: PASS, pad: "x".repeat(5000) }).toString() });
+    assert.equal(big.status, 413);
+    assert.equal(big.headers.get("set-cookie"), null);
+    const weak = await fetch(base + `/${WEAK}/__gate`, { method: "POST", redirect: "manual", signal: AbortSignal.timeout(REQ_MS),
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: "p=xxxxx" });
+    assert.equal(weak.status, 503);
+    assert.equal((await get(`/${SLUG}/__gate`, { Accept: "application/json" })).status, 405);
   });
 
   test("redirect hash: unsafe or over 200 chars is dropped", T, async () => {
