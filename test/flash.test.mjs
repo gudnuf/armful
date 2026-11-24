@@ -192,7 +192,7 @@ test("rail, hold, let go, previewer: no frame with a blank wall or stage", { tim
     await step("hold 2", () => tapSel('#list .face[data-pid="2"]'));
     await step("any", () => tapSel("#pair"));
     await step("let go of 2", () => tapSel('#list .face[data-pid="2"]'));
-    await step("clear", () => tapSel("#clear"));
+    await step("clear", () => tapSel("#list .clearAll"));
     await step("fold the rail", () => tapSel("#people"));
     await step("open the previewer", () => b.evalJs(`(() => { const t = document.querySelector('.tile[data-n="3"]'); t.click(); })()`));
     for (let k = 0; k < 3; k++) await step(`step ${k + 1}`, () => b.key("ArrowRight", 39), 400);

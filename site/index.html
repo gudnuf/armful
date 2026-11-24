@@ -45,8 +45,9 @@
 </header>
 
 <aside id="panel" class="panel" aria-label="People and filters" inert>
-  <div id="list" class="list" hidden><ol id="listMain"></ol></div>
+  <div id="list" class="list" hidden><button class="clearAll" type="button" tabindex="-1">clear all</button><ol id="listMain"></ol></div>
   <div id="filters" class="filters" role="group" aria-label="Filters" hidden>
+    <button class="clearAll" type="button" tabindex="-1">clear all</button>
     <section class="frow"><p class="lbl" id="lblN">People in the photo</p><div class="opts" id="optN" role="group" aria-labelledby="lblN"></div></section>
     <section class="frow" id="rowD"><p class="lbl" id="lblD">Day of the trip</p><div class="opts days" id="optD" role="group" aria-labelledby="lblD"></div>
       <div id="partsWrap" class="partsWrap" inert><div><div class="opts" id="optP" role="group" aria-label="Part of the day"></div></div></div></section>

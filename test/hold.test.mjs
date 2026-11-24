@@ -127,8 +127,10 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal(await hash(), "#p=2");
   assert.equal(await b.evalJs(`document.querySelector('#list .face[data-pid="1"]').getAttribute('aria-pressed')`), "false");
 
-  // × clears everything; the pill is the people again
-  await tap("#clear");
+  // open, the pill has no ×: clear all is inside the panel; it clears everything, the panel stays
+  assert.equal(await visible("#clear"), false, "no × while the panel is open");
+  await tap("#list .clearAll");
+  assert.equal(await visible("#list"), true, "the panel stays open");
   assert.equal(await hash(), "");
   assert.equal((await shown()).length, 60);
   assert.equal(await visible("#pair"), false);

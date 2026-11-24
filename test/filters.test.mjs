@@ -224,6 +224,50 @@ test("the pill: faces, the filter icon, a line of words (no count) and ×; × cl
   assert.equal((await shown()).length, 60);
 });
 
+test("open, the × is gone: the chevron alone folds (clearing nothing); clear all is inside the panel", async () => {
+  for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
+    mobile = m;
+    const q = "#p=1&d=2&m=f";
+    await b.load(w, h, m, "/example/" + q, READY);
+    const was = await shown();
+    // folded: × and an upward chevron at the right end
+    assert.equal(await visible("#clear"), true, `${w}: folded, × clears`);
+    assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#chev .chev')).transform`), "matrix(-1, 0, 0, -1, 0, 0)", "points up");
+    const chev = await b.evalJs(`document.getElementById('chev').getBoundingClientRect().toJSON()`);
+    for (const view of ["fbtn", "people"]) {
+      if (view === "people") await b.evalJs(`armful.openView('faces')`); else await tapId("fbtn");
+      await settled();
+      // open: no × to see or tap; the chevron is the pill's last control, where it was, pointing down, 44px
+      const s = await b.evalJs(`(() => { const x = document.getElementById('clear'), c = document.getElementById('chev'), r = c.getBoundingClientRect(), bar = document.getElementById('bar').getBoundingClientRect();
+        const last = [...document.getElementById('bar').children].filter((e) => e.getClientRects().length).at(-1);
+        return { x: x.getClientRects().length, hit: document.elementFromPoint(r.right + 22, r.top + r.height / 2)?.closest('#clear') ? 1 : 0, last: last.id,
+          w: r.width, h: r.height, left: r.left, top: r.top, down: getComputedStyle(c.querySelector('.chev')).transform, inBar: r.right <= bar.right + 0.5 }; })()`);
+      assert.deepEqual([s.x, s.hit, s.last, s.inBar], [0, 0, "chev", true], `${w} ${view}: no × while open`);
+      assert.ok(s.w >= 44 && s.h >= 44, `${w}: chevron ${s.w}x${s.h}`);
+      assert.deepEqual([s.left, s.top], [chev.left, chev.top], `${w}: the chevron keeps its place`);
+      assert.equal(s.down, "none", "points down");
+      // clear all, inside the panel, in view
+      const sel = view === "fbtn" ? "#filters .clearAll" : "#list .clearAll";
+      assert.equal(await b.evalJs(`(() => { const c = document.querySelector(${js(sel)}); return c.classList.contains('on') && getComputedStyle(c).visibility; })()`), "visible");
+      // the chevron folds, and clears nothing
+      await tapId("chev");
+      assert.ok(await b.until(`document.getElementById('list').hidden && document.getElementById('filters').hidden`), `${w}: folded`);
+      assert.equal(await hash(), q, "nothing cleared");
+      assert.deepEqual(await shown(), was);
+      assert.equal(await visible("#clear"), true, "folded: × again");
+    }
+    // clear all inside the open panel clears everything and leaves it open; then it hides (its place kept)
+    await tapId("fbtn"); await settled();
+    await press(`document.querySelector('#filters .clearAll')`);
+    assert.equal(await hash(), "");
+    assert.equal((await shown()).length, 60);
+    assert.equal(await visible("#filters"), true, "still open");
+    assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#filters .clearAll')).visibility`), "hidden", "nothing chosen: no clear all");
+    await b.key("Escape", 27);
+  }
+  mobile = true;
+});
+
 test("the swap: the filter icon folds the faces away and opens the filters in their place, and back; held faces stay", async () => {
   for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
     mobile = m;
@@ -361,6 +405,8 @@ for (const [w, h, m] of [[390, 844, true], [1440, 900, false]]) {
       ["clear one", () => tapOpt("Photos")],
       ["swap back", () => tapId("fbtn")],
       ["swap again", () => tapId("fbtn")],
+      ["clear all inside the panel", () => press(`document.querySelector('#filters .clearAll')`)],
+      ["choose again", () => tapOpt("Photos")],
       ["fold", () => tapId("chev")],
       ["clear all", () => tapId("clear")],
       ["open the filters", () => tapId("fbtn")],

@@ -79,7 +79,8 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
   assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "12 people", "said to screen readers");
   assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-label')`), "People filter, 12 people");
   assert.deepEqual(await b.evalJs(NO_TEXT), [], "the pill shows no words");
-  assert.equal(await b.evalJs(`document.querySelector('#more, #listMore, #list button:not(.face)')`), null, "one list, no +N more");
+  assert.equal(await b.evalJs(`document.querySelector('#more, #listMore, #list button:not(.face):not(.clearAll)')`), null, "one list, no +N more");
+  assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#list .clearAll')).visibility`), "hidden", "nothing chosen: no clear all");
   assert.equal(await visible("#pair"), false);
   assert.equal(await visible("#clear"), false);
   // the stack's three faces load with the page; the list's only when it opens

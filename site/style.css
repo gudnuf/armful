@@ -140,9 +140,18 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .chev { display: grid; transition: transform var(--spring); }
 .chev svg { width: 18px; height: 18px; }
 /* the chevron: its own target (open / fold); the panel opens upward, the chevron points the way it will go */
-.chevb { all: unset; box-sizing: border-box; cursor: pointer; display: grid; place-items: center; width: 36px; min-height: 44px; border-radius: 999px;
+.chevb { all: unset; box-sizing: border-box; cursor: pointer; display: grid; place-items: center; width: 44px; min-height: 44px; border-radius: 999px;
   color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent; position: relative; flex: none; }
-.chevb::after { content: ""; position: absolute; inset: 0 -4px; } /* 44px of target without 44px of pill */
+/* open, the chevron is the pill's only control on the right (× hides: a tap meant to fold never
+   clears); clear all moves into the panel, a quiet word at its top, there only while anything is
+   chosen (its place is kept, so it never moves the faces or the rows) */
+.clearAll { all: unset; box-sizing: border-box; cursor: pointer; min-height: 28px; padding: 0 8px; border-radius: 999px;
+  font: 500 12px/28px var(--sans); color: var(--dim); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line);
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent; white-space: nowrap; }
+.clearAll:not(.on) { visibility: hidden; pointer-events: none; }
+.clearAll:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
+.list > .clearAll { align-self: flex-start; }
+.filters > .clearAll { position: absolute; top: 8px; right: 10px; z-index: 1; }
 .chevb:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
 .chevb .chev { transform: rotate(180deg); }
 .chevb[aria-expanded="true"] .chev { transform: none; }

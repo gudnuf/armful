@@ -171,16 +171,16 @@ async function viewport(b, ev, [w, h, mobile]) {
     const ST = `(() => { const t = [...document.querySelectorAll('#wall .tile')], shown = t.filter((x) => !x.hidden).length;
       const pair = document.getElementById('pair'), label = document.getElementById('peopleLabel').textContent.trim();
       return { shown, total: t.length, held: document.getElementById('bar').classList.contains('held') && !pair.hidden && !!pair.querySelector('.face[data-pid="${pid}"]'),
-        x: !document.getElementById('clear').hidden, label, n: +(label.match(/^([\\d,.\\s]+) photos?$/)?.[1] || '').replace(/\\D/g, '') }; })()`;
+        x: !!document.querySelector('#list .clearAll.on'), label, n: +(label.match(/^([\\d,.\\s]+) photos?$/)?.[1] || '').replace(/\\D/g, '') }; })()`;
     const ok = await b.until(`(() => { const s = ${ST}; return s.shown > 0 && s.shown < s.total && s.held && s.x && s.n === s.shown; })()`, 5000);
     const s = await b.evalJs(ST);
-    check(`${tag} face: the wall filters (${s.shown} of ${N}), the pill holds the face, "${s.label}" and x`, ok,
-      `shown ${s.shown} of ${s.total}, face in pill ${s.held}, x ${s.x}, label ${js(s.label)}`);
-    // let go with the pill's x
-    await press("#clear");
+    check(`${tag} face: the wall filters (${s.shown} of ${N}), the pill holds the face, "${s.label}" and clear all`, ok,
+      `shown ${s.shown} of ${s.total}, face in pill ${s.held}, clear all ${s.x}, label ${js(s.label)}`);
+    // let go with the open panel's clear all (the pill's x hides while the panel is open)
+    await press("#list .clearAll");
     const back = await b.until(`(() => { const s = ${ST}; return s.shown === s.total && !s.held && !s.x && /people$/.test(s.label); })()`, 5000);
     const c = await b.evalJs(ST);
-    check(`${tag} face: the pill's x clears (${c.shown} of ${N}, "${c.label}")`, back, `shown ${c.shown} of ${c.total}, held ${c.held}, x ${c.x}, label ${js(c.label)}`);
+    check(`${tag} face: clear all clears (${c.shown} of ${N}, "${c.label}")`, back, `shown ${c.shown} of ${c.total}, held ${c.held}, x ${c.x}, label ${js(c.label)}`);
   } catch (e) { check(`${tag} face`, false, scrub(e.message)); }
 
   // the previewer's large photo, then close

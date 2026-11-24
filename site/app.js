@@ -326,6 +326,7 @@
     setAttr($("people"), "aria-expanded", String(open && view === "faces"));
     setAttr($("fbtn"), "aria-expanded", String(open && view === "filters"));
     document.body.classList.toggle("panelOpen", open);
+    drawClear();
     for (const el of [list, filt]) for (const an of el.getAnimations({ subtree: true })) if (!(an instanceof CSSTransition)) an.finish();
     if (!open) { list.hidden = true; filt.hidden = true; return; }
     const inEl = view === "faces" ? list : filt, outEl = view === "faces" ? filt : list;
@@ -450,6 +451,16 @@
     }
     return { ok, F, shown, c };
   }
+  // × in the pill only while the panel is folded; open, clear all is the quiet word inside it
+  function drawClear() {
+    const act = active(), x = !act || state.railOpen;
+    if ($("clear").hidden !== x) $("clear").hidden = x;
+    for (const c of document.querySelectorAll("#panel .clearAll")) {
+      if (c.classList.contains("on") !== act) c.classList.toggle("on", act);
+      setAttr(c, "tabindex", act ? "0" : "-1");
+      setAttr(c, "aria-hidden", String(!act));
+    }
+  }
   const filtering = () => state.n != null || state.d != null || state.m != null || state.s != null;
   const active = () => state.picked.length > 0 || filtering();
   // what is chosen, in a few words: together / any (two or more held), then the filters
@@ -542,7 +553,7 @@
     const words = terms();
     $("bar").classList.toggle("held", k > 0);
     $("pair").hidden = !k;
-    $("clear").hidden = !active();
+    drawClear();
     $("terms").hidden = !words.length;
     setText($("terms"), words.join(" · "));
     setAttr($("fbtn"), "aria-label", words.length ? `Filters: ${words.join(", ")}` : "Filters");
@@ -641,6 +652,7 @@
     // the held faces: two or more toggle together / any; one held, they are the faces button
     $("pair").onclick = () => { if (state.picked.length >= 2) setAny(!state.any); else $("people").onclick(); };
     $("clear").onclick = clear;
+    for (const c of document.querySelectorAll("#panel .clearAll")) c.onclick = clear;
     $("empty").querySelector("button").onclick = clear;
     addEventListener("hashchange", () => { load(); render(); });
   }
