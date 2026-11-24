@@ -595,8 +595,10 @@
     }
   }
   // the skeleton becomes the wall: the blocks on screen are measured, the tiles go in (already
-  // filtered by the URL's hold) and each tile on screen grows out of the block in its place on
-  // the spring; tiles past the blocks just appear. One read, one write, one read.
+  // filtered by the URL's hold) and each tile on screen takes the block's place. The build writes
+  // the blocks from this collection's data, so a tile normally has its block's box exactly and
+  // nothing moves; only where they differ (a hold in the URL, an unbuilt page) does a tile grow out
+  // of its block on the spring. Tiles past the blocks just appear. One read, one write, one read.
   function mount() {
     const skel = $("skel");
     const from = skel && !motion.matches ? [...skel.children].map((b) => b.getBoundingClientRect()).filter(onScreen) : [];
@@ -614,6 +616,7 @@
       if (!onScreen(r)) continue;
       const b = from[k++];
       if (!b) break;
+      if (Math.abs(b.left - r.left) < 0.5 && Math.abs(b.top - r.top) < 0.5 && Math.abs(b.width - r.width) < 0.5 && Math.abs(b.height - r.height) < 0.5) continue;
       t.animate([{ transform: flipFrom(b, r) }, { transform: "none" }], { duration: 420, easing: EASE });
     }
   }

@@ -50,11 +50,11 @@
 }
 @media (min-width: 1000px) { :root { --face-s: 56px; } }
 
-/* moving between the home page and a collection crossfades (both opt in here; the door does not),
-   the wordmark travelling between its two places */
+/* moving between the home page and a collection is one plain cross-fade of the whole page (both
+   opt in here; the door opts in too). Nothing is shared between the two: a named wordmark would
+   travel from the home page's big one into the header's slot, a big logo over an empty header */
 @view-transition { navigation: auto; }
 @media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }
-.mark { view-transition-name: wordmark; }
 
 /* base type: Inter 16/24 for everything; Bricolage only for the wordmark and the one title */
 * { box-sizing: border-box; }
@@ -225,17 +225,19 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 /* the first paint (static HTML, before any script or data): the header's numbers, the pill and
    the wall as quiet blocks of the shapes they will take. The wall's blocks use the tiles' own row
    rule (2 across on a phone, 4 from 1000px, 5 from 1600px; each block carries its row's aspect
-   sum for each width) and fill the first screen; the real tiles grow out of them (app.js).
+   sum for each width, and --G<n>: 0 where that row is a short last row) and fill the first screen.
+   The build (bin/build-dist.mjs) writes each collection's blocks from its own data.json, so every
+   block has exactly the box of the tile that replaces it: nothing moves when the data arrives.
    They breathe a little; under reduced motion they hold still. */
-.skel { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--gutter); container-type: inline-size;
+.skel { display: flex; flex-wrap: wrap; align-content: flex-start; align-items: flex-start; gap: var(--gutter); container-type: inline-size;
   height: calc(100vh - 48px - var(--st)); height: calc(100dvh - 48px - var(--st)); overflow: hidden; }
-.skel i { --n: 2; --S: var(--S2); flex: var(--ar) 0 calc((100cqw - (var(--n) - 1) * var(--gutter) - 1px) * var(--ar) / var(--S));
+.skel i { --n: 2; --S: var(--S2); --g: var(--G2, 1); flex: calc(var(--ar) * var(--g)) 0 calc((100cqw - (var(--n) - 1) * var(--gutter) - 1px) * var(--ar) / var(--S));
   aspect-ratio: var(--ar); min-width: 0; min-height: 100px; background: var(--tile); }
 @supports not (width: 1cqw) {
   .skel i { flex-basis: calc((100vw - var(--sl) - var(--sr) - (var(--n) - 1) * var(--gutter) - 24px) * var(--ar) / var(--S)); }
 }
-@media (min-width: 1000px) { .skel i { --n: 4; --S: var(--S4); } }
-@media (min-width: 1600px) { .skel i { --n: 5; --S: var(--S5); } }
+@media (min-width: 1000px) { .skel i { --n: 4; --S: var(--S4); --g: var(--G4, 1); } }
+@media (min-width: 1600px) { .skel i { --n: 5; --S: var(--S5); --g: var(--G5, 1); } }
 #stats:empty::before { content: ""; display: inline-block; vertical-align: middle;
   height: 8px; border-radius: 4px; background: var(--tile); }
 #stats:empty::before { width: 132px; }

@@ -67,17 +67,21 @@ Faces are 44px (36px from 1000px wide); the wall gutter is 2px.
   one viewport ahead at the size they are shown. A failed tile keeps its box
   and retries in place. A short last row stays ragged, never stretched.
 - **Loading.** No blank page and no spinner: the static HTML is the first
-  paint, the header, the pill and a wall of quiet blocks in the wall's own
-  row shapes (they breathe a little; still under reduced motion). When
-  `data.json` arrives the blocks on screen grow into the real tiles on the
-  spring, the numbers fill reserved space, and images fade in inside boxes
-  already sized. If it fails, the message takes the blocks' place.
+  paint, the header, the pill and a wall of quiet blocks (they breathe a
+  little; still under reduced motion). The build writes the blocks from the
+  collection's own data, so each has exactly the box of the tile that takes
+  its place: when `data.json` arrives nothing moves, the numbers fill
+  reserved space, and images fade in inside boxes already sized. If it
+  fails, the message takes the blocks' place.
   test/flash.test.mjs films a throttled cold load and the main interactions
   and fails on any frame with an empty wall.
 - **State.** One state object (phase, hold, rail, previewer) and one render
   path that changes only what differs; nodes are made once, never rebuilt.
   Pages crossfade between home and a collection (cross-document view
-  transitions; the door does not opt in).
+  transitions), the whole page only: nothing is shared, so the home page's
+  big wordmark never travels over the collection. The header is in its
+  final place from the collection's first frame. test/transition.test.mjs
+  films a Recent tap with a valid cookie at phone and desktop sizes.
 - **The panel (desktop) / the rail (phone).** A floating panel top-left on
   wide screens; on a phone a pill bottom-left that opens upward. Collapsed on
   arrival; faces load only when the list opens; Esc or a tap outside folds

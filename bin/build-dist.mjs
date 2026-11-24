@@ -208,6 +208,39 @@ function inlineMark(siteRoot) {
   return out;
 }
 
+// The collection page's first paint: its skeleton blocks, written from the collection's own
+// data.json so that each block has exactly the box of the tile that replaces it (site/app.js lays
+// the tiles out by the same rule: the files it keeps, each tile's clamped aspect ratio to 3
+// decimals, rows of 2 / 4 / 5 whose --S is the sum of those ratios; a short last row adds 1.5 per
+// missing place and does not grow). Only numbers go in: no ids, no names.
+const SKEL_BLOCKS = 40; // fills the first screen at every width; divisible by 2, 4 and 5
+const SKEL_OPEN = '<div id="skel" class="skel" aria-hidden="true">';
+function skeleton(dataBuf, where) {
+  let d;
+  try { d = JSON.parse(dataBuf.toString("utf8")); } catch (e) { fail(`${where}: data.json is not JSON: ${e.message}`); }
+  if (!d || typeof d !== "object" || !Array.isArray(d.files)) fail(`${where}: data.json has no files list`);
+  const num = (x) => typeof x === "number" && Number.isFinite(x) && x > 0;
+  const ok = (f) => !!f && typeof f === "object" && typeof f.i === "string" && f.i !== "" && num(f.w) && num(f.h) && Array.isArray(f.p) &&
+    (f.v == null || typeof f.v === "number" || typeof f.v === "boolean"); // app.js okFile()
+  const ars = d.files.filter(ok).slice(0, SKEL_BLOCKS).map((f) => Math.min(2.4, Math.max(0.62, f.w / f.h)).toFixed(3)); // app.js tileAr()
+  if (!ars.length) fail(`${where}: data.json has no usable files`);
+  const rows = (n) => ars.map((_, k) => {
+    const start = k - (k % n), row = ars.slice(start, start + n);
+    let S = row.reduce((a, x) => a + +x, 0);
+    // a row cut short by SKEL_BLOCKS is full on the page; only the collection's real last row is short
+    const full = row.length === n || start + n <= d.files.filter(ok).length;
+    if (!full) S += (n - row.length) * 1.5;
+    return { S: S.toFixed(3), g: full ? "" : `;--G${n}:0` };
+  });
+  const r2 = rows(2), r4 = rows(4), r5 = rows(5);
+  return ars.map((a, k) => `<i style="--ar:${a};--S2:${r2[k].S};--S4:${r4[k].S};--S5:${r5[k].S}${r2[k].g}${r4[k].g}${r5[k].g}"></i>`).join("\n");
+}
+function withSkeleton(html, dataBuf, where) {
+  const at = html.indexOf(SKEL_OPEN), end = at < 0 ? -1 : html.indexOf("</div>", at);
+  if (at < 0 || end < 0 || html.indexOf(SKEL_OPEN, at + 1) >= 0) fail(`site/index.html: needs exactly one ${SKEL_OPEN}...</div>`);
+  return html.slice(0, at + SKEL_OPEN.length) + "\n" + skeleton(dataBuf, where) + "\n" + html.slice(end);
+}
+
 function main() {
   const o = args(process.argv.slice(2));
   const siteRoot = dir(o.site, "--site"), homeRoot = dir(o.home, "--home");
@@ -276,7 +309,7 @@ function main() {
   for (const [ref, name] of [["app.js", appName], ["style.css", styleName]])
     if (!colHtml.includes(`"${name}`)) fail(`site/index.html does not reference ${ref}`);
   for (const c of built) {
-    put(`${c.slug}/index.html`, colHtml);
+    put(`${c.slug}/index.html`, withSkeleton(colHtml, c.data, `collection ${c.slug}`));
     put(`${c.slug}/${appName}`, app);
     put(`${c.slug}/${styleName}`, styleCss);
     for (const [n, buf] of svgs) put(`${c.slug}/${n}`, buf);

@@ -122,6 +122,23 @@ test("the collection page references only hashed or shipped files", () => {
   assert.doesNotMatch(html, /(^|[^\w.-])(app\.js|style\.css)/);
 });
 
+test("the collection's skeleton is written from its own data: one block per tile on the first screen, numbers only", () => {
+  const html = read("example/index.html");
+  const blocks = [...html.match(/<div id="skel" class="skel" aria-hidden="true">([\s\S]*?)<\/div>/)[1].matchAll(/<i style="([^"]*)"><\/i>/g)].map((m) => m[1]);
+  const files = JSON.parse(readFileSync(join(WS, "fixture", "data.json"), "utf8")).files
+    .filter((f) => f && typeof f.i === "string" && f.i && f.w > 0 && f.h > 0 && Array.isArray(f.p));
+  assert.equal(blocks.length, Math.min(40, files.length));
+  const ar = (f) => Math.min(2.4, Math.max(0.62, f.w / f.h)).toFixed(3);
+  blocks.forEach((st, k) => {
+    assert.match(st, /^--ar:[\d.]+;--S2:[\d.]+;--S4:[\d.]+;--S5:[\d.]+(;--G[245]:0)*$/, st);
+    assert.equal(st.match(/--ar:([\d.]+)/)[1], ar(files[k]), `block ${k}`);
+    for (const n of [2, 4, 5]) {
+      const row = files.slice(k - (k % n), k - (k % n) + n).map(ar);
+      assert.equal(st.match(new RegExp(`--S${n}:([\\d.]+)`))[1], row.reduce((a, x) => a + +x, 0).toFixed(3), `block ${k}, ${n} across`);
+    }
+  });
+});
+
 test("reference rewriting: whole attribute values, any quoting, query and fragment kept", () => {
   const ws = workspace();
   const p = join(ws, "site", "index.html");
