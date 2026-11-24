@@ -468,6 +468,69 @@ class Merges(ClearScan):
                 self.assertEqual(snapshot(os.path.join(self.col, "state"), os.path.join(self.col, "dist")), before)
 
 
+class Faces(ClearScan):
+    """faces.json picks which pre-merge face a merged person shows."""
+
+    def put(self, name, m):
+        dump(m, os.path.join(self.col, name))
+
+    def test_face_from_merged_id(self):
+        self.build()
+        d0 = self.data()
+        a, dd, b = self.of("a1"), self.of("d1"), self.of("b1")
+        rep_d = next(p for p in d0["people"] if p["id"] == dd)["rep"]
+        reps0 = load(os.path.join(self.col, "state", "reps.json"))
+        self.put("merges.json", {str(dd): a})
+        self.put("faces.json", {str(a): dd})
+        self.build()
+        d = self.data()
+        pa = next(p for p in d["people"] if p["id"] == a)
+        self.assertEqual(d["files"][pa["rep"]["f"]]["i"], d0["files"][rep_d["f"]]["i"], "D's face shown for A")
+        self.assertEqual(pa["rep"]["box"], rep_d["box"])
+        self.assertIn(a, d["files"][pa["rep"]["f"]]["p"])
+        self.assertEqual((pa["n"], pa["nv"]), (6, 0))
+        pb0 = next(p for p in d0["people"] if p["id"] == b)
+        self.assertEqual(next(p for p in d["people"] if p["id"] == b), pb0, "others untouched")
+        reps = load(os.path.join(self.col, "state", "reps.json"))
+        self.assertEqual(reps[str(a)], reps0[str(dd)])
+        self.assertNotIn(str(dd), reps)
+        self.assertEqual(load(os.path.join(self.col, "state", "build_report.json"))["faces"], [[a, dd]])
+
+    def test_face_from_itself_is_a_no_op(self):
+        self.build()
+        d0 = self.data()
+        a = self.of("a1")
+        self.put("faces.json", {str(a): a})
+        self.build()
+        self.assertEqual(self.data(), d0)
+
+    def test_bad_faces_write_nothing(self):
+        self.build()
+        a, b, dd = self.of("a1"), self.of("b1"), self.of("d1")
+        self.put("merges.json", {str(dd): a})
+        self.build()
+        before = snapshot(os.path.join(self.col, "state"), os.path.join(self.col, "dist"))
+        for bad, why in (
+            ("[1, 2]", "a JSON object"),
+            ('{"x": 1}', "person ids"),
+            (json.dumps({str(a): "1"}), "person ids"),
+            (json.dumps({str(a): True}), "person ids"),
+            (json.dumps({str(dd): dd}), "no person after merges"),
+            (json.dumps({"999": a}), "no person after merges"),
+            (json.dumps({str(a): 999}), "no person on any photo"),
+            (json.dumps({str(a): b}), "not"),
+            (json.dumps({str(b): dd}), "not"),
+            ("{", "not valid JSON"),
+        ):
+            with self.subTest(faces=bad):
+                with open(os.path.join(self.col, "faces.json"), "w") as f:
+                    f.write(bad)
+                r = self.build(ok=False)
+                self.assertIn(why, r.stdout + r.stderr)
+                self.assertIn("nothing written", r.stdout + r.stderr)
+                self.assertEqual(snapshot(os.path.join(self.col, "state"), os.path.join(self.col, "dist")), before)
+
+
 def write_jpeg(path, when=None, offset=None):
     """A tiny placeholder JPEG; `when` "YYYY:MM:DD HH:MM:SS" goes in EXIF DateTimeOriginal."""
     exif = Image.Exif()

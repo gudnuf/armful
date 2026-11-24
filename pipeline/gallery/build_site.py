@@ -168,6 +168,19 @@ def merge_map(raw, where):
     return out
 
 
+def face_map(raw, where):
+    """faces.json: {"<canonical id>": <source id>}: the merged person shows the face <source id> had
+    before the merge. Shape only here; the ids are checked once people and merges are known."""
+    if not isinstance(raw, dict):
+        sys.exit(f"{where}: faces must be a JSON object {{\"<canonical id>\": <source id>}}; nothing written")
+    out = {}
+    for k, v in raw.items():
+        if not (isinstance(k, str) and k.isdigit()) or not isinstance(v, int) or isinstance(v, bool):
+            sys.exit(f"{where}: {k!r}: {v!r}: keys must be person ids as strings and values person ids; nothing written")
+        out[int(k)] = v
+    return out
+
+
 def main(argv=None):
     ap = collection.parser(__doc__)
     ap.add_argument("--out", help="folder to write data.json into (default: <collection>/dist)")
@@ -203,6 +216,7 @@ def main(argv=None):
     state_f = os.path.join(st, "person_faces.json")
     hidden_f = os.path.join(col, "hidden.json")
     merges_f = os.path.join(col, "merges.json")
+    faces_f = os.path.join(col, "faces.json")
     data_f = os.path.join(out_dir, "data.json")
     written = [data_f] + [os.path.join(st, n) for n in ("person_faces.json", "reps.json", "build_report.json")]
     for w in written:
@@ -229,6 +243,14 @@ def main(argv=None):
         except (OSError, ValueError) as e:
             sys.exit(f"{merges_f}: merges are not valid JSON ({e}); nothing written")
         merge_to = merge_map(raw, merges_f)
+    face_from = {}
+    if os.path.exists(faces_f):
+        try:
+            with open(faces_f, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, ValueError) as e:
+            sys.exit(f"{faces_f}: faces are not valid JSON ({e}); nothing written")
+        face_from = face_map(raw, faces_f)
     prev = {}
     if os.path.exists(state_f):
         try:
@@ -432,6 +454,18 @@ def main(argv=None):
                 sys.exit(f"{merges_f}: {what} {i} ({dup} -> {canon}) is no person on any photo; nothing written")
             if "x" in entries[i][2]:
                 sys.exit(f"{merges_f}: {what} {i} ({dup} -> {canon}) is an uncertain person: only clear people merge; nothing written")
+    # faces: the canonical shows the face one of its members had before the merge
+    for canon, src in sorted(face_from.items()):
+        if canon not in entries or canon in merge_to:
+            sys.exit(f"{faces_f}: {canon} ({canon} <- {src}) is no person after merges; nothing written")
+        if src not in entries:
+            sys.exit(f"{faces_f}: source {src} ({canon} <- {src}) is no person on any photo; nothing written")
+        if src != canon and merge_to.get(src) != canon:
+            sys.exit(f"{faces_f}: source {src} ({canon} <- {src}) is not {canon} or merged into it; nothing written")
+    for canon, src in face_from.items():
+        entries[canon][2]["rep"] = entries[src][2]["rep"]
+        if src in reps:
+            reps[canon] = reps[src]
     members = defaultdict(list)  # canonical id -> every id folded into it (itself first)
     for pid in entries:
         members[merge_to.get(pid, pid)].append(pid)
@@ -494,6 +528,7 @@ def main(argv=None):
                 uncertain=uncertain,
                 uncertain_kept=bool(args.keep_uncertain),
                 merged=sorted([d, c] for d, c in merge_to.items()),
+                faces=sorted([c, s] for c, s in face_from.items()),
                 hidden=sorted(hidden),
                 hidden_by_merge=sorted(hidden_eff - hidden),
                 photos=len(photo_keys),

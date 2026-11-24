@@ -7,6 +7,7 @@ dist/
 **/data.json
 **/hidden.json
 **/merges.json
+**/faces.json
 
 # per-collection config: only the placeholder example is committed
 collections/*/

@@ -34,6 +34,7 @@ collections/<slug>/
   collection.json   slug, title, drive_folder, door_photo, door_position, hidden, tz
   hidden.json       optional: person ids never shown (joined with collection.json "hidden")
   merges.json       optional: {"<dup id>": <canonical id>, ...} people the scan split in two
+  faces.json        optional: {"<canonical id>": <source id>, ...} which face a merged person shows
   state/            person_faces.json (stable person ids), reps.json, reports
   dist/data.json    the built page data (default output)
 ```
@@ -51,6 +52,13 @@ may be both merged away and merged into, and a bad file stops the build before
 anything is written. Hiding either id hides the merged person. Person ids
 themselves never change: the duplicate keeps its id in `person_faces.json`, it
 just never reaches the page.
+
+`faces.json` picks the face a merged person shows: `{"<canonical id>": <source
+id>}` gives the canonical the representative face the source had before the
+merge (the source is the canonical itself or one of the ids merged into it).
+The canonical must still be a person after merges, the source a person before
+them; anything else stops the build before anything is written. Both files
+are git-ignored and the guard refuses them.
 
 `state/person_faces.json` is what keeps person ids stable across rebuilds,
 and hidden ids refer to it: keep it with the collection, and never rebuild a
