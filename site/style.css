@@ -32,6 +32,7 @@
   --ink: #16231F; --paper: #FBFAF7; --cream: #F2EFE8; --body: #4A5754; --stone: #6B7975;
   --ground: #FBFAF7; --text: #16231F; --dim: #4A5754; --ring: #16231F; --line: rgba(22, 35, 31, .12);
   --veil: rgba(255, 255, 255, .75); --veil-blur: 20px; --rail: rgba(251, 250, 247, .5);
+  --tile: #F2EFE8; /* an empty photo box, and the skeleton's blocks: cream on paper, a deep grey on the dark ground */
   --display: "Bricolage Grotesque", "Bricolage Fallback", "Inter", ui-sans-serif, system-ui, sans-serif;
   --sans: "Inter", "Inter Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* motion: --spring for anything that moves, --fade for opacity, --press for a tapped face (120ms) */
@@ -45,9 +46,15 @@
 @supports (transition-timing-function: linear(0, 1)) { :root { --spring: 420ms linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1); } }
 @media (prefers-color-scheme: dark) {
   :root { --ground: #0D0F0E; --text: #F2EFE8; --dim: rgba(242, 239, 232, .68); --ring: #FBFAF7;
-    --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); --rail: rgba(13, 15, 14, .45); }
+    --line: rgba(242, 239, 232, .14); --veil: rgba(13, 15, 14, .72); --rail: rgba(13, 15, 14, .45); --tile: #1D2220; }
 }
 @media (min-width: 1000px) { :root { --face-s: 56px; } }
+
+/* moving between the home page and a collection crossfades (both opt in here; the door does not),
+   the wordmark travelling between its two places */
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }
+.mark { view-transition-name: wordmark; }
 
 /* base type: Inter 16/24 for everything; Bricolage only for the wordmark and the one title */
 * { box-sizing: border-box; }
@@ -99,7 +106,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .masthead { display: flex; align-items: center; gap: 14px; height: calc(48px + var(--st)); padding: var(--st) 14px 0; }
 .mark { display: flex; align-items: center; min-height: 44px; color: var(--text); line-height: 0; border-radius: 4px; }
 .mark svg { width: 72px; height: auto; fill: currentColor; }
-.stats { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 156px; }
 
 /* the people: one compact pill bottom-left (every width). Nobody held: three faces, the people,
    a chevron. Someone held: their faces, the count, ×. The pill opens a narrow rail of faces up
@@ -120,7 +127,8 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .bar.held .stack { display: none; }
 .stack { display: flex; flex: none; }
 .stack img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; background: var(--cream); box-shadow: 0 0 0 2px var(--ground); }
-.stack img + img { margin-left: -10px; }
+.stack img + img, .stack .sk + .sk { margin-left: -10px; }
+.stack .sk { display: block; width: 30px; height: 30px; border-radius: 50%; background: var(--cream); box-shadow: 0 0 0 2px var(--ground); }
 .chev { display: grid; transition: transform var(--spring); }
 .chev svg { width: 18px; height: 18px; }
 /* the rail opens upward: the chevron points the way it will go */
@@ -135,6 +143,11 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; border-radius: 28px;
   background: linear-gradient(90deg, var(--rail), transparent); }
 .list::-webkit-scrollbar { display: none; }
+/* the rail rises in on the spring as it opens (a CSS entry transition, not a view transition:
+   during one the browser sends every tap to the root, and the wall beside the rail must stay live);
+   it folds at once */
+.list { transition: transform var(--spring), opacity var(--fade); }
+@starting-style { .list { transform: translateY(18px); opacity: 0; } }
 .list ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .list li { display: flex; align-items: center; gap: 6px; }
 .list .face img { box-shadow: 0 1px 4px rgba(13, 15, 14, .28); }
@@ -190,7 +203,7 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .tile { --n: 2; --S: 3; --g: 1; position: relative; display: block; box-sizing: border-box; overflow: hidden;
   /* 1px of slack keeps rounding from wrapping a row; flex-grow (by aspect ratio) takes it back */
   flex: calc(var(--ar) * var(--g)) 0 calc((100cqw - (var(--n) - 1) * var(--gutter) - 1px) * var(--ar) / var(--S));
-  aspect-ratio: var(--ar); min-width: 0; min-height: 100px; background: var(--cream);
+  aspect-ratio: var(--ar); min-width: 0; min-height: 100px; background: var(--tile);
   transform-origin: 0 0; transition: transform var(--spring), opacity var(--fade);
   -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 @supports not (width: 1cqw) {
@@ -210,15 +223,39 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .tile .play svg { width: 18px; height: 18px; }
 
-/* loading (the heap symbol, its top disc pulsing, alone at the centre), failed, and nothing-found */
+/* the first paint (static HTML, before any script or data): the header's numbers, the pill and
+   the wall as quiet blocks of the shapes they will take. The wall's blocks use the tiles' own row
+   rule (2 across on a phone, 4 from 1000px, 5 from 1600px; each block carries its row's aspect
+   sum for each width) and fill the first screen; the real tiles grow out of them (app.js).
+   They breathe a little; under reduced motion they hold still. */
+.skel { display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--gutter); container-type: inline-size;
+  height: calc(100vh - 48px - var(--st)); height: calc(100dvh - 48px - var(--st)); overflow: hidden; }
+.skel i { --n: 2; --S: var(--S2); flex: var(--ar) 0 calc((100cqw - (var(--n) - 1) * var(--gutter) - 1px) * var(--ar) / var(--S));
+  aspect-ratio: var(--ar); min-width: 0; min-height: 100px; background: var(--tile); }
+@supports not (width: 1cqw) {
+  .skel i { flex-basis: calc((100vw - var(--sl) - var(--sr) - (var(--n) - 1) * var(--gutter) - 24px) * var(--ar) / var(--S)); }
+}
+@media (min-width: 1000px) { .skel i { --n: 4; --S: var(--S4); } }
+@media (min-width: 1600px) { .skel i { --n: 5; --S: var(--S5); } }
+#stats:empty::before, #peopleLabel:empty::before { content: ""; display: inline-block; vertical-align: middle;
+  height: 8px; border-radius: 4px; background: var(--tile); }
+#stats:empty::before { width: 132px; }
+#peopleLabel:empty::before { width: 72px; }
+.skel, #stats:empty::before, #peopleLabel:empty::before, .stack .sk { animation: breathe 1.6s ease-in-out infinite alternate; }
+@keyframes breathe { to { opacity: .6; } }
+body:not([data-phase="skeleton"]) .skel { display: none; }
+@media (prefers-color-scheme: dark) { .stack .sk { background: #2A2F2D; } }
+body[data-phase="error"] #stats::before, body[data-phase="error"] #panel { display: none; }
+
+/* the status line: only for screen readers while the blocks are up; if data.json fails, the
+   message and Try again take the blocks' place */
 .state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
   padding: 56px 16px; text-align: center; color: var(--dim); }
-#loading { position: fixed; inset: 0; z-index: 5; background: var(--ground); }
-#loading[hidden] { display: none !important; }
+body[data-phase="skeleton"] #loading { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+body[data-phase="error"] #loading { min-height: calc(100vh - 48px - var(--st)); min-height: calc(100dvh - 48px - var(--st)); }
 #loading p:not(.sr) { color: var(--text); }
 .symbol { width: 56px; height: 56px; fill: var(--text); }
 .symbol .top { transform-box: fill-box; transform-origin: center; animation: pulse 1.4s cubic-bezier(.2, 0, 0, 1) infinite alternate; }
-#loading.failed .symbol .top { animation: none; }
 @keyframes pulse { from { opacity: 1; transform: none; } to { opacity: .25; transform: scale(.86); } }
 @keyframes fadein { from { opacity: 0; } }
 
@@ -229,6 +266,9 @@ footer { margin: 44px auto 0; padding: 18px 16px calc(96px + var(--sb)); /* the 
    wall arriving above it moves nothing */
 footer[inert] { display: none; }
 
+/* the previewer closing: its photo travels back into its tile while the dark fades (app.js) */
+.ghost { position: fixed; z-index: 31; margin: 0; pointer-events: none; transform-origin: 0 0; object-fit: cover; }
+.ghostGround { position: fixed; inset: 0; z-index: 30; background: #0D0F0E; pointer-events: none; }
 /* the previewer: one photo or video, large, over the page; always dark */
 body.lbOpen { overflow: hidden; }
 .lb { position: fixed; inset: 0; z-index: 30; background: #0D0F0E; color: var(--cream); touch-action: pinch-zoom;

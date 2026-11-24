@@ -47,10 +47,11 @@ test("desktop: opens in the held set, counts files, steps, traps focus, Esc / Ba
   await b.load(1280, 900, false, "/example/#p=1.2", READY);
   const photo = set.find((i) => !D.files[i].v);
 
-  // the wall's own thumbnail stands in at once, scaled up to the photo's final size
+  // the wall's own thumbnail stands in at once, laid out at the photo's final size (offsetWidth: it
+  // grows there from its tile on the spring)
   const s = await b.evalJs(`(() => { const t = document.querySelector('.tile[data-n="${photo}"]'); t.scrollIntoView({ block: 'center' });
     return new Promise((r) => { const im = t.querySelector('img'); const go = () => { const w = t.getBoundingClientRect().width; t.click();
-      const st = document.querySelector('#lbStage img'); r({ thumb: im.currentSrc, src: st?.src, soft: st?.classList.contains('soft'), w, sw: st?.getBoundingClientRect().width }); };
+      const st = document.querySelector('#lbStage img'); r({ thumb: im.currentSrc, src: st?.src, soft: st?.classList.contains('soft'), w, sw: st?.offsetWidth }); };
       im.complete && im.naturalWidth ? go() : (im.onload = go); }); })()`);
   assert.equal(s.soft, true, "stand-in first");
   assert.equal(s.src, s.thumb, "the wall's thumbnail");

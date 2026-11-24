@@ -14,9 +14,10 @@
 <link rel="preconnect" href="https://drive.google.com" crossorigin>
 <link rel="preload" href="fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="data.json" as="fetch" crossorigin>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-phase="skeleton">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-head" viewBox="0 0 12 16">
     <circle cx="6" cy="4.6" r="3.4"/><path d="M0 16c0-4 2.6-6.6 6-6.6S12 12 12 16z"/>
@@ -40,24 +41,67 @@
   <p id="stats" class="lbl stats"></p>
 </header>
 
-<aside id="panel" class="panel" aria-label="People" hidden>
+<aside id="panel" class="panel" aria-label="People" inert>
   <div id="list" class="list" hidden><ol id="listMain"></ol><button id="more" class="pill more" aria-expanded="false" aria-controls="listMore" hidden></button><ol id="listMore" hidden></ol></div>
   <div id="bar" class="bar">
     <button id="pair" class="pair tight" type="button" hidden></button>
-    <button id="people" class="pill" aria-expanded="false" aria-controls="list"><span class="stack" aria-hidden="true"></span><span id="peopleLabel" aria-live="polite"></span><span class="chev" aria-hidden="true"><svg><use href="#i-chev"/></svg></span></button>
+    <button id="people" class="pill" aria-expanded="false" aria-controls="list"><span class="stack" aria-hidden="true"><i class="sk"></i><i class="sk"></i><i class="sk"></i></span><span id="peopleLabel" aria-live="polite"></span><span class="chev" aria-hidden="true"><svg><use href="#i-chev"/></svg></span></button>
     <button id="clear" class="x" type="button" aria-label="Clear" hidden><svg aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
 </aside>
 
 <main id="wall" class="wall" aria-label="Photos"></main>
+<!-- the first paint: a wall of cream blocks the real tiles grow out of when the data arrives -->
+<div id="skel" class="skel" aria-hidden="true">
+<i style="--ar:1.5;--S2:2.167;--S4:5.000;--S5:5.750"></i>
+<i style="--ar:0.667;--S2:2.167;--S4:5.000;--S5:5.750"></i>
+<i style="--ar:1.333;--S2:2.833;--S4:5.000;--S5:5.750"></i>
+<i style="--ar:1.5;--S2:2.833;--S4:5.000;--S5:5.750"></i>
+<i style="--ar:0.75;--S2:2.250;--S4:4.695;--S5:5.750"></i>
+<i style="--ar:1.5;--S2:2.250;--S4:4.695;--S5:6.778"></i>
+<i style="--ar:1.778;--S2:2.445;--S4:4.695;--S5:6.778"></i>
+<i style="--ar:0.667;--S2:2.445;--S4:4.695;--S5:6.778"></i>
+<i style="--ar:1.5;--S2:2.833;--S4:5.000;--S5:6.778"></i>
+<i style="--ar:1.333;--S2:2.833;--S4:5.000;--S5:6.778"></i>
+<i style="--ar:0.667;--S2:2.167;--S4:5.000;--S5:6.167"></i>
+<i style="--ar:1.5;--S2:2.167;--S4:5.000;--S5:6.167"></i>
+<i style="--ar:1;--S2:2.500;--S4:4.750;--S5:6.167"></i>
+<i style="--ar:1.5;--S2:2.500;--S4:4.750;--S5:6.167"></i>
+<i style="--ar:1.5;--S2:2.250;--S4:4.750;--S5:6.167"></i>
+<i style="--ar:0.75;--S2:2.250;--S4:4.750;--S5:6.028"></i>
+<i style="--ar:1.333;--S2:3.111;--S4:5.278;--S5:6.028"></i>
+<i style="--ar:1.778;--S2:3.111;--S4:5.278;--S5:6.028"></i>
+<i style="--ar:0.667;--S2:2.167;--S4:5.278;--S5:6.028"></i>
+<i style="--ar:1.5;--S2:2.167;--S4:5.278;--S5:6.028"></i>
+<i style="--ar:1.5;--S2:2.833;--S4:5.083;--S5:6.583"></i>
+<i style="--ar:1.333;--S2:2.833;--S4:5.083;--S5:6.583"></i>
+<i style="--ar:0.75;--S2:2.250;--S4:5.083;--S5:6.583"></i>
+<i style="--ar:1.5;--S2:2.250;--S4:5.083;--S5:6.583"></i>
+<i style="--ar:1.5;--S2:2.167;--S4:5.278;--S5:6.583"></i>
+<i style="--ar:0.667;--S2:2.167;--S4:5.278;--S5:6.278"></i>
+<i style="--ar:1.778;--S2:3.111;--S4:5.278;--S5:6.278"></i>
+<i style="--ar:1.333;--S2:3.111;--S4:5.278;--S5:6.278"></i>
+<i style="--ar:1;--S2:2.500;--S4:4.667;--S5:6.278"></i>
+<i style="--ar:1.5;--S2:2.500;--S4:4.667;--S5:6.278"></i>
+<i style="--ar:0.667;--S2:2.167;--S4:4.667;--S5:5.750"></i>
+<i style="--ar:1.5;--S2:2.167;--S4:4.667;--S5:5.750"></i>
+<i style="--ar:1.5;--S2:2.250;--S4:5.083;--S5:5.750"></i>
+<i style="--ar:0.75;--S2:2.250;--S4:5.083;--S5:5.750"></i>
+<i style="--ar:1.333;--S2:2.833;--S4:5.083;--S5:5.750"></i>
+<i style="--ar:1.5;--S2:2.833;--S4:5.083;--S5:6.778"></i>
+<i style="--ar:1.778;--S2:3.278;--S4:5.278;--S5:6.778"></i>
+<i style="--ar:1.5;--S2:3.278;--S4:5.278;--S5:6.778"></i>
+<i style="--ar:0.667;--S2:2.000;--S4:5.278;--S5:6.778"></i>
+<i style="--ar:1.333;--S2:2.000;--S4:5.278;--S5:6.778"></i>
+</div>
 <div id="loading" class="state" role="status">
-  <svg class="symbol" viewBox="0 0 512 512" aria-hidden="true">
-    <path d="M35.3 228.2C35.3 350.1 134.1 448.9 256 448.9C302.6 448.9 345.9 434.4 381.5 409.7V440.4H476.7V98.1H381.5V194Q387.2 198.1 392.2 203.1Q403.9 214.8 410.4 230.1Q417 245.8 417 263.1Q417 280.3 410.4 296.1Q403.9 311.3 392.2 323Q380.5 334.7 365.3 341.1Q349.5 347.8 332.3 347.8Q322.1 347.8 312.5 345.5C295.5 354.5 276.3 359.5 256 359.5C235.7 359.5 216.5 354.5 199.5 345.5Q189.9 347.8 179.7 347.8Q162.5 347.8 146.7 341.1Q131.5 334.7 119.8 323Q108.1 311.3 101.6 296.1Q95 280.3 95 263.1Q95 245.8 101.6 230.1Q108.1 214.8 119.8 203.1Q124.8 198.1 130.5 194V98.1H35.3ZM400.1 263.1C400.1 225.6 369.7 195.3 332.3 195.3C294.8 195.3 264.5 225.6 264.5 263.1C264.5 300.5 294.8 330.9 332.3 330.9C369.7 330.9 400.1 300.5 400.1 263.1ZM247.5 263.1C247.5 225.6 217.2 195.3 179.7 195.3C142.3 195.3 111.9 225.6 111.9 263.1C111.9 300.5 142.3 330.9 179.7 330.9C217.2 330.9 247.5 300.5 247.5 263.1Z"/>
-    <circle class="top" cx="256" cy="130.9" r="67.8"/>
-  </svg>
   <p class="sr">Loading</p>
   <button class="primary" hidden>Try again</button>
 </div>
+<template id="markTpl"><svg class="symbol" viewBox="0 0 512 512" aria-hidden="true">
+    <path d="M35.3 228.2C35.3 350.1 134.1 448.9 256 448.9C302.6 448.9 345.9 434.4 381.5 409.7V440.4H476.7V98.1H381.5V194Q387.2 198.1 392.2 203.1Q403.9 214.8 410.4 230.1Q417 245.8 417 263.1Q417 280.3 410.4 296.1Q403.9 311.3 392.2 323Q380.5 334.7 365.3 341.1Q349.5 347.8 332.3 347.8Q322.1 347.8 312.5 345.5C295.5 354.5 276.3 359.5 256 359.5C235.7 359.5 216.5 354.5 199.5 345.5Q189.9 347.8 179.7 347.8Q162.5 347.8 146.7 341.1Q131.5 334.7 119.8 323Q108.1 311.3 101.6 296.1Q95 280.3 95 263.1Q95 245.8 101.6 230.1Q108.1 214.8 119.8 203.1Q124.8 198.1 130.5 194V98.1H35.3ZM400.1 263.1C400.1 225.6 369.7 195.3 332.3 195.3C294.8 195.3 264.5 225.6 264.5 263.1C264.5 300.5 294.8 330.9 332.3 330.9C369.7 330.9 400.1 300.5 400.1 263.1ZM247.5 263.1C247.5 225.6 217.2 195.3 179.7 195.3C142.3 195.3 111.9 225.6 111.9 263.1C111.9 300.5 142.3 330.9 179.7 330.9C217.2 330.9 247.5 300.5 247.5 263.1Z"/>
+    <circle class="top" cx="256" cy="130.9" r="67.8"/>
+  </svg></template>
 <div id="empty" class="state" hidden><p>No photos</p><button class="pill quiet" type="button" hidden>clear</button></div>
 
 <footer inert>
@@ -74,6 +118,6 @@
     <button id="lbClose" class="icon" title="Close" aria-label="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
 </div>
-<script src="app.js"></script>
+<script src="app.js" defer></script>
 </body>
 </html>

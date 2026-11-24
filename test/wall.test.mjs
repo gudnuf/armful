@@ -223,7 +223,7 @@ test("a failed thumbnail keeps its box, retries in place on Enter, and recovers 
   rmSync(p59, { force: true });
 });
 
-test("loading shows the heap symbol with the footer inert; a failed data.json says so", async () => {
+test("loading shows the skeleton (wall blocks, pill, header) with the footer inert; a failed data.json replaces it", async () => {
   const paused = [];
   const off = b.on("Fetch.requestPaused", (p) => paused.push(p.requestId));
   await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*data.json*" }] });
@@ -232,12 +232,26 @@ test("loading shows the heap symbol with the footer inert; a failed data.json sa
     for (let k = 0; k < 50 && !paused.length; k++) await sleep(100);
     assert.equal(paused.length, 1, "data.json was requested");
     assert.equal(await b.evalJs(`document.getElementById('loading').hidden`), false);
-    assert.equal(await b.evalJs(`document.querySelector('#loading .symbol').getBoundingClientRect().width > 0`), true);
-    assert.equal(await b.evalJs(`getComputedStyle(document.querySelector('#loading .symbol .top')).animationName`), "pulse");
+    assert.equal(await b.evalJs(`document.body.dataset.phase`), "skeleton");
+    // the blocks fill the first screen, two a row, under the header; the pill and the numbers hold their places
+    const sk = await b.evalJs(`(() => { const bs = [...document.querySelectorAll('#skel i')].map((i) => i.getBoundingClientRect());
+      return { n: bs.filter((r) => r.top < innerHeight).length, row: bs.filter((r) => Math.abs(r.top - bs[0].top) < 1).length, top: bs[0].top,
+        bottom: Math.max(...bs.map((r) => r.bottom)), anim: getComputedStyle(document.getElementById('skel')).animationName,
+        pill: document.getElementById('bar').getBoundingClientRect().width, stats: getComputedStyle(document.getElementById('stats'), '::before').width }; })()`);
+    assert.ok(sk.n >= 8, `blocks on screen: ${sk.n}`);
+    assert.equal(sk.row, 2);
+    assert.equal(sk.top, 48);
+    assert.ok(sk.bottom >= 844, "the blocks reach the bottom of the screen");
+    assert.equal(sk.anim, "breathe");
+    assert.ok(sk.pill > 100, "the pill's skeleton");
+    assert.notEqual(sk.stats, "auto", "the numbers' placeholder");
+    assert.equal(await b.evalJs(`document.getElementById('panel').inert`), true, "the pill waits for the data");
     assert.equal(await b.evalJs(`document.querySelector('footer').inert`), true, "footer out of the tab order while loading");
     await b.cdp("Fetch.fulfillRequest", { requestId: paused[0], responseCode: 500, body: "" });
     assert.ok(await b.until(`document.getElementById('loading').innerText.includes('The photos didn’t load.')`), "error text");
     assert.equal(await b.evalJs(`(() => { const t = [...document.querySelectorAll('#loading button')].find((x) => !x.hidden); return t ? t.textContent.trim() : null; })()`), "Try again");
+    assert.equal(await b.evalJs(`document.querySelectorAll('#skel').length`), 0, "the message takes the blocks' place");
+    assert.equal(await b.evalJs(`document.getElementById('panel').getClientRects().length`), 0, "no pill without data");
   } finally { await b.cdp("Fetch.disable"); off(); }
 });
 

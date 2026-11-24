@@ -33,9 +33,11 @@ No colour. Ink on paper, a white veil over the photos, one spring.
 | `--ring` | `#16231F` | `#FBFAF7` |
 | `--line` | `rgba(22, 35, 31, .12)` | `rgba(242, 239, 232, .14)` |
 | `--veil` | `rgba(255, 255, 255, .75)`, blur 20px | `rgba(13, 15, 14, .72)` |
+| `--tile` | `#F2EFE8` | `#1D2220` |
 
-The five named colours never change; ground, text, dim, ring, line and veil
-follow the device's colour scheme.
+The five named colours never change; ground, text, dim, ring, line, veil
+and tile (an empty photo box, and the skeleton's blocks) follow the device's
+colour scheme.
 
 **Type.** Self-hosted woff2 only (OFL 1.1, `site/fonts/`): no request goes
 to a font host. Inter 400/500/600 for everything at 16/24. Bricolage
@@ -64,6 +66,18 @@ Faces are 44px (36px from 1000px wide); the wall gutter is 2px.
   aspect ratio before any image arrives; images fade in in a wave and load
   one viewport ahead at the size they are shown. A failed tile keeps its box
   and retries in place. A short last row stays ragged, never stretched.
+- **Loading.** No blank page and no spinner: the static HTML is the first
+  paint, the header, the pill and a wall of quiet blocks in the wall's own
+  row shapes (they breathe a little; still under reduced motion). When
+  `data.json` arrives the blocks on screen grow into the real tiles on the
+  spring, the numbers fill reserved space, and images fade in inside boxes
+  already sized. If it fails, the message takes the blocks' place.
+  test/flash.test.mjs films a throttled cold load and the main interactions
+  and fails on any frame with an empty wall.
+- **State.** One state object (phase, hold, rail, previewer) and one render
+  path that changes only what differs; nodes are made once, never rebuilt.
+  Pages crossfade between home and a collection (cross-document view
+  transitions; the door does not opt in).
 - **The panel (desktop) / the rail (phone).** A floating panel top-left on
   wide screens; on a phone a pill bottom-left that opens upward. Collapsed on
   arrival; faces load only when the list opens; Esc or a tap outside folds

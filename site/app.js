@@ -1,6 +1,13 @@
 // armful: shared photos. The wall is every file as a whole photo in justified rows; pictures
 // stay in Drive (thumbnails by URL, kept only by the browser's own HTTP cache). A tap on a photo
 // opens it large on the page; Drive itself is one small link away.
+//
+// One state object and one render path. Every change (data arriving, a face held or let go, the
+// rail opening, the previewer stepping, the URL's hash) writes `state` and calls render(), which
+// compares it with what is on screen (`drawn`) and touches only what differs: nodes are made once
+// and then shown, hidden, moved or relabelled, never rebuilt, so nothing on screen flashes.
+// The page arrives as a skeleton (static HTML: the header, the pill and a wall of blocks); when
+// data.json lands the blocks grow into the real tiles.
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
@@ -13,9 +20,23 @@
   const ar = (f) => (f.w && f.h ? f.w / f.h : 16 / 9);
   const dpr = () => Math.min(window.devicePixelRatio || 1, 3);
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  const SPRING = "linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1)";
+  const EASE = CSS.supports("transition-timing-function", SPRING) ? SPRING : "cubic-bezier(.2, .8, .2, 1)";
+  // write only what changed (a same-value write is free, but this keeps render() honest)
+  const setText = (el, v) => { if (el.textContent !== v) el.textContent = v; };
+  const setAttr = (el, k, v) => { if (el.getAttribute(k) !== v) el.setAttribute(k, v); };
+  const setVar = (el, k, v) => { if (el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v); };
   let D;
   let tiles = []; // one <a class="tile"> per file, in D.files order
   let tilesOf = new Map(); // person id -> indexes of the files they are in
+
+  // ---- the state, and what is on screen ----
+  // phase: skeleton (the static first paint) | ready | error. picked / any: the hold (the URL's
+  // hash mirrors them). railOpen / moreOpen: the faces rail and its "+N more". lb: the previewer's
+  // place in lbSet (the files the wall showed when it opened), -1 when closed.
+  const state = { phase: "skeleton", picked: [], any: false, railOpen: false, moreOpen: false, lb: -1 };
+  let lbSet = [];
+  const drawn = { phase: "skeleton", filter: "", rail: false, more: false, lb: -1, lbSet: null };
 
   // ---- picture URLs: data.json's `thumbs` templates win (the test fixture, other hosts) ----
   // a wall thumbnail `width` wide
@@ -62,10 +83,10 @@
       let S = row.reduce((a, t) => a + +t.style.getPropertyValue("--ar"), 0);
       if (!full) S += (n - row.length) * 1.5;
       row.forEach((t, j) => {
-        t.style.setProperty("--S", S.toFixed(3));
-        t.style.setProperty("--n", n);
-        t.style.setProperty("--g", full ? 1 : 0);
-        t.style.setProperty("--d", `${j * 12}ms`);
+        setVar(t, "--S", S.toFixed(3));
+        setVar(t, "--n", String(n));
+        setVar(t, "--g", full ? "1" : "0");
+        setVar(t, "--d", `${j * 12}ms`);
       });
     }
   }
@@ -93,7 +114,7 @@
   function recovered(a) {
     a.classList.remove("failed");
     a.querySelector(".retry")?.remove();
-    a.setAttribute("aria-label", label(+a.dataset.n));
+    setAttr(a, "aria-label", label(+a.dataset.n));
   }
   function retry(a) {
     const img = a.querySelector("img"), n = (+a.dataset.r || 0) + 1;
@@ -101,8 +122,8 @@
     img.src = retryUrl(thumbUrl(D.files[+a.dataset.n], tileSize(a)), n);
   }
 
+  // the tiles, made once (not yet in the page: mount() puts them in)
   function buildWall() {
-    const wall = $("wall"), frag = document.createDocumentFragment();
     tiles = D.files.map((f, i) => {
       const a = document.createElement("a");
       a.className = "tile"; a.dataset.n = i;
@@ -115,15 +136,11 @@
       img.onerror = () => { a.dataset.err = (+a.dataset.err || 0) + 1; failed(a); };
       a.append(img);
       if (f.v) a.insertAdjacentHTML("beforeend", '<span class="play"><svg aria-hidden="true"><use href="#i-play"/></svg></span>');
-      frag.append(a);
       return a;
     });
-    wall.append(frag);
-    layout();
-    watch();
     // a plain click opens the previewer (a failed tile retries instead); the href stays for
     // new-tab clicks and as the no-script fallback
-    wall.addEventListener("click", (e) => {
+    $("wall").addEventListener("click", (e) => {
       const a = e.target.closest(".tile");
       if (!a) return;
       if (a.classList.contains("failed")) { e.preventDefault(); retry(a); return; }
@@ -148,13 +165,13 @@
     for (let k = a; k < list.length; k++) { const r = list[k].getBoundingClientRect(); if (r.top >= hi) break; out.set(list[k], r); }
     return out;
   }
+  const flipFrom = (b, r) => `translate(${b.left - r.left}px, ${b.top - r.top}px) scale(${b.width / r.width}, ${b.height / r.height})`;
   // show exactly the files with ok[i]; tiles near the screen travel to their new places on the
   // spring (FLIP), the rest just snap. Reads first, then writes; reduced motion reads nothing.
-  function setShown(ok) {
-    const animate = !motion.matches;
+  function setShown(ok, animate = !motion.matches) {
     const was = animate ? nearby(tiles.filter((t) => !t.hidden)) : null;
     let shown = 0;
-    tiles.forEach((t, i) => { t.hidden = !ok[i]; if (ok[i]) shown++; });
+    tiles.forEach((t, i) => { if (t.hidden !== !ok[i]) t.hidden = !ok[i]; if (ok[i]) shown++; });
     layout();
     $("empty").hidden = shown > 0;
     if (!animate) return;
@@ -165,7 +182,7 @@
       if (!b) { moves.push([t, null]); continue; } // newly near: fades in where it lands
       const dx = b.left - r.left, dy = b.top - r.top, sx = b.width / r.width, sy = b.height / r.height;
       if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5 || Math.abs(sx - 1) >= 0.01 || Math.abs(sy - 1) >= 0.01)
-        moves.push([t, `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`]);
+        moves.push([t, flipFrom(b, r)]);
     }
     if (!moves.length) return;
     for (const [t, tf] of moves) { t.style.transition = "none"; if (tf) t.style.transform = tf; else t.style.opacity = "0"; }
@@ -177,7 +194,7 @@
   const BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   let byId = new Map();
   let peopleN = 0; // people shown in the list (not the +N more)
-  const faceEls = new Map(); // person id -> { btn, b } in the list
+  const faceEls = new Map(); // person id -> { btn, b, li } in the list
   let faceIo = null;
   // a face picture: Google's server crop, or for a rotated photo (Google crops the raw, unrotated
   // pixels) a CSS crop of Drive's upright thumbnail; a person without a face to show stays a cream disc
@@ -213,9 +230,9 @@
     const zero = new Set();
     for (const [pid, e] of faceEls) {
       const n = countFor(pid);
-      e.b.textContent = nf(n);
-      e.btn.classList.toggle("dim", n === 0);
-      e.btn.setAttribute("aria-label", `Person ${pid}, ${nf(n)} photos`);
+      setText(e.b, nf(n));
+      if (e.btn.classList.contains("dim") !== (n === 0)) e.btn.classList.toggle("dim", n === 0);
+      setAttr(e.btn, "aria-label", `Person ${pid}, ${nf(n)} photos`);
       if (n === 0) zero.add(pid);
     }
     for (const ol of [$("listMain"), $("listMore")]) {
@@ -223,10 +240,17 @@
       if (want.some((li, k) => ol.children[k] !== li)) ol.append(...want);
     }
   }
-  function panelOpen(open) {
+  // the rail: open or folded (a public helper for the tests and the pill)
+  function panelOpen(open) { state.railOpen = !!open; render(); }
+  function drawRail() {
+    const open = state.railOpen;
     $("list").hidden = !open;
-    $("people").setAttribute("aria-expanded", String(open));
+    setAttr($("people"), "aria-expanded", String(open));
     document.body.classList.toggle("panelOpen", open);
+  }
+  function drawMore() {
+    $("listMore").hidden = !state.moreOpen;
+    setAttr($("more"), "aria-expanded", String(state.moreOpen));
   }
   function buildPeople() {
     byId = new Map(D.people.map((p) => [p.id, p]));
@@ -241,34 +265,24 @@
     $("more").hidden = !rest.length;
     $("more").textContent = `+${nf(rest.length)} more`;
     peopleN = main.length;
-    $("peopleLabel").textContent = `${nf(peopleN)} people`;
-    $("stats").textContent = `${nf(peopleN)} people · ${plural(D.files.length, "photo")}`;
-    // the collapsed pill's three faces load with the page
-    $("people").querySelector(".stack").append(...[...main].sort((a, c) => c.n - a.n).slice(0, 3).map((p) => { const i = faceImg(); paintFace(i, p); return i; }));
-    updateCounts((pid) => (tilesOf.get(pid) || []).length);
+    // the collapsed pill's three faces load with the page, in the places of the skeleton's discs
+    $("people").querySelector(".stack").replaceChildren(...[...main].sort((a, c) => c.n - a.n).slice(0, 3).map((p) => { const i = faceImg(); paintFace(i, p); return i; }));
 
-    $("people").onclick = () => panelOpen($("list").hidden);
-    $("more").onclick = () => {
-      const open = $("listMore").hidden;
-      $("listMore").hidden = !open;
-      $("more").setAttribute("aria-expanded", String(open));
-    };
+    $("people").onclick = () => panelOpen(!state.railOpen);
+    $("more").onclick = () => { state.moreOpen = !state.moreOpen; render(); };
     // the rail stays open while the wall scrolls and taps through; only the pill or Esc folds it
     // (an Esc the previewer already took is not ours)
     addEventListener("keydown", (e) => {
-      if (e.key !== "Escape" || e.defaultPrevented || $("list").hidden || !$("lb").hidden) return;
+      if (e.key !== "Escape" || e.defaultPrevented || !state.railOpen || state.lb >= 0) return;
       e.preventDefault();
       panelOpen(false);
       $("people").focus();
     });
-    $("panel").hidden = false;
   }
   // ---- the hold: who is held, and whether the wall shows photos with all of them (together, the
   // default) or with any of them (any: a tap on the held faces, unannounced). The URL keeps it:
   // #p=3.7 / #p=3.7&any ----
-  const state = { picked: [], any: false };
   const plural = (n, w) => `${nf(n)} ${w}${n === 1 ? "" : "s"}`;
-  const SPRING = "linear(0, 0.1895, 0.3445, 0.4713, 0.5751, 0.66, 0.7295, 0.7863, 0.8328, 0.8708, 0.902, 0.9274, 0.9483, 0.9653, 0.9793, 0.9907, 1)";
   // which files have everyone in `sel` (together) or anyone in it (any); nobody held: every file
   function matches(sel, any) {
     if (!sel.size) return D.files.map(() => true);
@@ -281,19 +295,28 @@
     if (!state.picked.length) return n;
     return state.any ? shownN + n - t : t; // any: shown ∪ theirs; together: shown ∩ theirs
   }
-  // the held faces, small, into `el` (the pill; the previewer reuses it): at most four, then +N
+  // the held faces, small, into `el` (the pill; the previewer reuses it): at most four, then +N.
+  // Faces already there stay (their pictures never reload); only the difference is added or removed.
   function renderPair(el, picked = state.picked) {
-    const show = picked.slice(0, 4);
-    el.replaceChildren(...show.map((pid) => {
+    const have = new Map([...el.querySelectorAll(":scope > .face")].map((s) => [+s.dataset.pid, s]));
+    const kids = picked.slice(0, 4).map((pid) => {
+      if (have.has(pid)) return have.get(pid);
       const s = document.createElement("span"), img = faceImg();
       s.className = "face held"; s.dataset.pid = pid;
       paintFace(img, byId.get(pid));
       s.append(img);
       return s;
-    }));
-    if (picked.length > 4) { const m = document.createElement("span"); m.className = "more"; m.textContent = `+${nf(picked.length - 4)}`; el.append(m); }
+    });
+    if (picked.length > 4) {
+      const m = el.querySelector(":scope > .more") || Object.assign(document.createElement("span"), { className: "more" });
+      setText(m, `+${nf(picked.length - 4)}`);
+      kids.push(m);
+    }
+    for (const c of [...el.children]) if (!kids.includes(c)) c.remove();
+    kids.forEach((c, j) => { if (el.children[j] !== c) el.insertBefore(c, el.children[j] || null); });
   }
-  function render() {
+  // the wall, the counts and the pill for the hold in `state`
+  function drawFilter(animate) {
     const sel = new Set(state.picked), ok = matches(sel, state.any), k = state.picked.length;
     shownN = 0; tally = new Map();
     ok.forEach((y, i) => {
@@ -301,27 +324,32 @@
       shownN++;
       for (const p of new Set(D.files[i].p)) tally.set(p, (tally.get(p) || 0) + 1);
     });
-    setShown(ok);
+    setShown(ok, animate);
     updateCounts(countFor);
-    for (const [pid, e] of faceEls) { const h = sel.has(pid); e.btn.classList.toggle("held", h); e.btn.setAttribute("aria-pressed", String(h)); }
+    for (const [pid, e] of faceEls) {
+      const h = sel.has(pid);
+      if (e.btn.classList.contains("held") !== h) e.btn.classList.toggle("held", h);
+      setAttr(e.btn, "aria-pressed", String(h));
+    }
     // the pill: nobody held, three faces and the people; someone held, their faces, the count and ×
     $("bar").classList.toggle("held", k > 0);
     $("pair").hidden = $("clear").hidden = !k;
-    $("peopleLabel").textContent = k ? plural(shownN, "photo") : `${nf(peopleN)} people`;
+    setText($("peopleLabel"), k ? plural(shownN, "photo") : `${nf(peopleN)} people`);
     const pair = $("pair");
     renderPair(pair);
     pair.classList.toggle("tight", !state.any);
     pair.classList.toggle("apart", state.any);
-    pair.setAttribute("aria-label", "Held: " + state.picked.map((p) => `Person ${p}`).join(", "));
+    setAttr(pair, "aria-label", "Held: " + state.picked.map((p) => `Person ${p}`).join(", "));
     // nothing together: say so, and offer to let go
-    $("empty").querySelector("p").textContent = k >= 2 && !state.any ? "No photos of them together" : "No photos";
+    setText($("empty").querySelector("p"), k >= 2 && !state.any ? "No photos of them together" : "No photos");
     $("empty").querySelector("button").hidden = !k;
   }
+  const filterKey = () => `${state.picked.join(".")}|${state.any ? 1 : 0}`;
   function save() {
     const h = state.picked.length ? `#p=${state.picked.join(".")}${state.any ? "&any" : ""}` : "";
     if (h !== location.hash) history.replaceState(history.state, "", h || location.pathname + location.search);
   }
-  // unknown, hidden or malformed ids are dropped silently
+  // the hold from the URL: unknown, hidden or malformed ids are dropped silently
   function load() {
     const m = location.hash.match(/^#p=([^&]*)/);
     state.picked = m ? [...new Set(m[1].split(".").filter((x) => /^\d{1,9}$/.test(x)).map(Number))].filter((p) => byId.has(p)) : [];
@@ -354,7 +382,7 @@
       const t = j / 12, u = 1 - t;
       frames.push({ offset: t, transform: `translate(${2 * u * t * cx + t * t * dx}px, ${2 * u * t * cy + t * t * dy}px) scale(${1 + (s - 1) * t})` });
     }
-    const an = c.animate(frames, { duration: 420, easing: CSS.supports("transition-timing-function", SPRING) ? SPRING : "cubic-bezier(.2, .8, .2, 1)" });
+    const an = c.animate(frames, { duration: 420, easing: EASE });
     const done = () => { c.remove(); to.style.visibility = ""; };
     an.onfinish = done; an.oncancel = done;
   }
@@ -367,42 +395,42 @@
       if (adding) fly(btn, pid);
     });
     // the held faces: two or more toggle together / any; one held, they open the rail like the pill
-    $("pair").onclick = () => { if (state.picked.length >= 2) setAny(!state.any); else panelOpen($("list").hidden); };
+    $("pair").onclick = () => { if (state.picked.length >= 2) setAny(!state.any); else panelOpen(!state.railOpen); };
     $("clear").onclick = clear;
     $("empty").querySelector("button").onclick = clear;
     addEventListener("hashchange", () => { load(); render(); });
-    load();
-    if (state.picked.length) render();
   }
   const slug = decodeURIComponent(location.pathname.split("/")[1] || "") || "armful";
 
   // ---- previewer (lightbox): the photo large on the page, stepping through what the wall shows ----
-  const lb = { set: [], k: 0, from: null, token: 0 };
+  const lbx = { from: null, token: 0, entry: false };
   function preload(i) {
     const f = D.files[i];
     if (!f || f.v) return;
     const im = new Image(); im.referrerPolicy = "no-referrer"; im.src = bigUrl(f);
   }
+  // the photo (or video) at state.lb into the stage; the old one goes in the same frame
   function lbShow() {
-    const i = lb.set[lb.k], f = D.files[i], stage = $("lbStage"), token = ++lb.token;
+    const k = state.lb, i = lbSet[k], f = D.files[i], stage = $("lbStage"), token = ++lbx.token;
     stage.style.setProperty("--ar", ar(f));
     $("lbDrive").href = view(f.i);
-    $("lbPrev").disabled = lb.k === 0;
-    $("lbNext").disabled = lb.k === lb.set.length - 1;
+    $("lbPrev").disabled = k === 0;
+    $("lbNext").disabled = k === lbSet.length - 1;
     $("lb").setAttribute("aria-label", f.v ? "Video" : "Photo");
-    $("lbCount").textContent = `${nf(lb.k + 1)} / ${nf(lb.set.length)}`; // files, in wall order
+    $("lbCount").textContent = `${nf(k + 1)} / ${nf(lbSet.length)}`; // files, in wall order
     stage.className = "lbStage"; stage.style.transform = ""; stage.style.opacity = "";
+    const thumb = tiles[i]?.querySelector("img")?.currentSrc || thumbUrl(f, wallSize()); // the wall's own thumbnail: already here
     if (f.v) { // Drive's own player: plays inline, with controls, without leaving the page
       // until it has loaded (and settled), the wall's thumbnail stands in, dimmed, with the
       // loading mark; then the player fades in over it. Never a bare black frame.
       const box = document.createElement("div"), poster = new Image(), fr = document.createElement("iframe");
       box.className = "vid";
       poster.className = "poster"; poster.alt = ""; poster.referrerPolicy = "no-referrer"; poster.draggable = false;
-      poster.src = tiles[i]?.querySelector("img")?.currentSrc || thumbUrl(f, wallSize());
-      const mark = $("loading").querySelector(".symbol").cloneNode(true);
+      poster.decoding = "sync"; poster.src = thumb;
+      const mark = $("markTpl").content.firstElementChild.cloneNode(true);
       fr.allow = "autoplay; fullscreen"; fr.allowFullscreen = true; fr.referrerPolicy = "no-referrer"; fr.title = "Video";
       fr.addEventListener("load", () => setTimeout(() => {
-        if (token !== lb.token) return;
+        if (token !== lbx.token) return;
         box.classList.add("ready");
         setTimeout(() => mark.remove(), 300);
       }, 300), { once: true });
@@ -412,25 +440,44 @@
     } else {
       const img = new Image();
       img.alt = ""; img.referrerPolicy = "no-referrer"; img.draggable = false;
-      img.className = "soft"; img.src = tiles[i]?.querySelector("img")?.currentSrc || thumbUrl(f, wallSize()); // the wall's own thumbnail: shows at once
+      // decoded in the frame it is shown: the stand-in never paints as an empty box
+      img.decoding = "sync"; img.className = "soft"; img.src = thumb;
       stage.replaceChildren(img);
       const big = new Image();
       big.alt = ""; big.referrerPolicy = "no-referrer"; big.draggable = false;
       // decoded: the same element takes the large picture (no second entrance animation)
       big.onload = () => (big.decode ? big.decode() : Promise.resolve()).catch(() => {}).then(() => {
-        if (token === lb.token) { img.src = big.src; img.classList.remove("soft"); }
+        if (token === lbx.token) { img.src = big.src; img.classList.remove("soft"); }
       });
-      big.onerror = () => { if (token === lb.token && !big.dataset.retry) { big.dataset.retry = 1; setTimeout(() => (big.src = retryUrl(bigUrl(f), 1)), 1200); } };
+      big.onerror = () => { if (token === lbx.token && !big.dataset.retry) { big.dataset.retry = 1; setTimeout(() => (big.src = retryUrl(bigUrl(f), 1)), 1200); } };
       big.src = bigUrl(f);
     }
-    preload(lb.set[lb.k + 1]); preload(lb.set[lb.k - 1]);
+    preload(lbSet[k + 1]); preload(lbSet[k - 1]);
   }
+  const onScreen = (r) => r.width > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
   function lbOpen(i) {
-    lb.set = []; // what the wall shows, in order
-    tiles.forEach((t, j) => { if (!t.hidden) lb.set.push(j); });
-    lb.k = lb.set.indexOf(i);
-    if (lb.k < 0) return;
-    lb.from = tiles[i];
+    const set = []; // what the wall shows, in order
+    tiles.forEach((t, j) => { if (!t.hidden) set.push(j); });
+    const k = set.indexOf(i);
+    if (k < 0) return;
+    lbSet = set; state.lb = k; lbx.from = tiles[i];
+    render();
+  }
+  function lbClose() { if (state.lb >= 0) { state.lb = -1; render(); } }
+  function lbStep(d) {
+    const k = state.lb + d;
+    if (state.lb < 0 || k < 0 || k >= lbSet.length) return;
+    state.lb = k; render();
+  }
+  function drawLb() {
+    const was = drawn.lb, now = state.lb, sameSet = drawn.lbSet === lbSet;
+    drawn.lb = now; drawn.lbSet = lbSet;
+    if (now < 0) { if (was >= 0) lbHide(); return; }
+    if (was < 0 || !sameSet) { lbReveal(); return; }
+    lbShow();
+    $("lbStage").classList.add(now > was ? "in-next" : "in-prev");
+  }
+  function lbReveal() {
     // the hold, small at the bottom: the held faces only (nothing when no one is held)
     const k = state.picked.length;
     $("lbHold").hidden = !k;
@@ -438,38 +485,55 @@
       renderPair($("lbPair"));
       $("lbPair").className = `pair ${state.any ? "apart" : "tight"}`;
     } else $("lbPair").replaceChildren();
+    const from = !motion.matches && lbx.from ? lbx.from.getBoundingClientRect() : null;
     $("lb").hidden = false;
     document.body.classList.add("lbOpen");
     lbShow();
     $("lbClose").focus();
+    // the photo grows out of its tile on the spring (the dark fades in under it)
+    const el = $("lbStage").firstElementChild;
+    if (from && el && onScreen(from)) {
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height) el.animate([{ transformOrigin: "0 0", transform: flipFrom(from, r) }, { transformOrigin: "0 0", transform: "none" }], { duration: 420, easing: EASE });
+    }
     // the phone's Back button closes the previewer instead of leaving the page (one extra history entry, reused)
-    if (!lb.entry) { history.pushState({ lb: 1 }, ""); lb.entry = true; }
+    if (!lbx.entry) { history.pushState({ lb: 1 }, ""); lbx.entry = true; }
   }
-  addEventListener("popstate", () => {
-    lb.entry = false;
-    if (!$("lb").hidden) lbClose();
-  });
-  function lbClose() {
+  function lbHide() {
     if ($("lb").hidden) return;
-    lb.token++;
+    lbx.token++;
+    const el = $("lbStage").firstElementChild, pic = el?.tagName === "IMG" ? el : el?.querySelector(".poster");
+    const r = pic && !motion.matches ? el.getBoundingClientRect() : null;
     $("lb").hidden = true;
     $("lbStage").replaceChildren(); // also stops a playing video
     document.body.classList.remove("lbOpen");
-    const t = tiles[lb.set[lb.k]] || lb.from; // back to the tile last looked at
-    if (t) { t.focus({ preventScroll: true }); t.scrollIntoView({ block: "nearest" }); }
+    const t = tiles[lbSet[lastK]] || lbx.from; // back to the tile last looked at
+    if (!t) return;
+    t.focus({ preventScroll: true }); t.scrollIntoView({ block: "nearest" });
+    // the photo travels back into its tile while the dark fades
+    const to = t.getBoundingClientRect();
+    if (!r || !r.width || !onScreen(to)) return;
+    const g = pic.cloneNode(), ground = document.createElement("div");
+    g.className = "ghost"; g.decoding = "sync"; g.removeAttribute("style");
+    Object.assign(g.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    ground.className = "ghostGround";
+    document.body.append(ground, g);
+    const a = g.animate([{ transform: "none" }, { transform: `translate(${to.left - r.left}px, ${to.top - r.top}px) scale(${to.width / r.width}, ${to.height / r.height})` }], { duration: 420, easing: EASE });
+    ground.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, easing: "cubic-bezier(.2, 0, 0, 1)", fill: "forwards" });
+    const done = () => { g.remove(); ground.remove(); };
+    a.onfinish = done; a.oncancel = done;
   }
-  function lbStep(d) {
-    const k = lb.k + d;
-    if (k < 0 || k >= lb.set.length) return;
-    lb.k = k; lbShow();
-    $("lbStage").classList.add(d > 0 ? "in-next" : "in-prev");
-  }
+  let lastK = -1; // the previewer's last place, for the tile focus goes back to
+  addEventListener("popstate", () => {
+    lbx.entry = false;
+    if (state.lb >= 0) lbClose();
+  });
   $("lbPrev").onclick = () => lbStep(-1);
   $("lbNext").onclick = () => lbStep(1);
   $("lbClose").onclick = lbClose;
   $("lb").addEventListener("click", (e) => { if (e.target === $("lb") || e.target === $("lbStage")) lbClose(); });
   addEventListener("keydown", (e) => {
-    if ($("lb").hidden) return;
+    if (state.lb < 0) return;
     if (e.key === "Escape") { e.preventDefault(); lbClose(); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); lbStep(-1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); lbStep(1); }
@@ -493,7 +557,7 @@
       const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
       if (!axis && Math.hypot(dx, dy) > 10) axis = Math.abs(dx) > Math.abs(dy) ? "x" : dy > 0 ? "y" : "-";
       if (axis === "x") { // resist at the two ends
-        const end = (dx > 0 && lb.k === 0) || (dx < 0 && lb.k === lb.set.length - 1);
+        const end = (dx > 0 && state.lb === 0) || (dx < 0 && state.lb === lbSet.length - 1);
         stage.style.transform = `translateX(${end ? dx / 4 : dx}px)`;
       } else if (axis === "y" && dy > 0) { stage.style.transform = `translateY(${dy}px)`; stage.style.opacity = String(Math.max(0.3, 1 - dy / 500)); }
     }, { passive: true });
@@ -501,13 +565,62 @@
       if (x0 == null) return;
       const t = e.changedTouches[0], dx = t ? t.clientX - x0 : 0, dy = t ? t.clientY - y0 : 0;
       x0 = null;
-      const k = lb.k;
+      const k = state.lb;
       if (e.type === "touchend" && Math.abs(dx) > 48 && Math.abs(dx) > 1.5 * Math.abs(dy)) lbStep(dx < 0 ? 1 : -1);
       else if (e.type === "touchend" && axis === "y" && dy > 110 && dy > 1.5 * Math.abs(dx)) return lbClose();
-      if (lb.k === k) { stage.classList.add("back"); stage.style.transform = ""; stage.style.opacity = ""; } // not far enough: settle back
+      if (state.lb === k) { stage.classList.add("back"); stage.style.transform = ""; stage.style.opacity = ""; } // not far enough: settle back
     };
     $("lb").addEventListener("touchend", end, { passive: true });
     $("lb").addEventListener("touchcancel", end, { passive: true });
+  }
+
+  // ---- the one render path ----
+  function render() {
+    if (state.phase !== drawn.phase) drawPhase();
+    if (state.phase !== "ready") return;
+    const f = filterKey();
+    if (f !== drawn.filter) { drawn.filter = f; drawFilter(); }
+    if (state.moreOpen !== drawn.more) { drawn.more = state.moreOpen; drawMore(); }
+    if (state.railOpen !== drawn.rail) { drawn.rail = state.railOpen; drawRail(); }
+    if (state.lb >= 0) lastK = state.lb;
+    if (state.lb !== drawn.lb || (state.lb >= 0 && lbSet !== drawn.lbSet)) drawLb();
+  }
+  function drawPhase() {
+    drawn.phase = state.phase;
+    document.body.dataset.phase = state.phase;
+    if (state.phase === "ready") mount();
+    else if (state.phase === "error") { // say so, in the blocks' place, and offer another go
+      $("skel")?.remove();
+      const p = loading.querySelector("p");
+      p.textContent = "The photos didn’t load.";
+      p.classList.remove("sr");
+      loading.classList.add("failed");
+      tryAgain.hidden = false;
+    }
+  }
+  // the skeleton becomes the wall: the blocks on screen are measured, the tiles go in (already
+  // filtered by the URL's hold) and each tile on screen grows out of the block in its place on
+  // the spring; tiles past the blocks just appear. One read, one write, one read.
+  function mount() {
+    const skel = $("skel");
+    const from = skel && !motion.matches ? [...skel.children].map((b) => b.getBoundingClientRect()).filter(onScreen) : [];
+    $("wall").append(...tiles);
+    drawn.filter = filterKey();
+    drawFilter(false);
+    setText($("stats"), `${nf(peopleN)} people · ${plural(D.files.length, "photo")}`);
+    loading.hidden = true;
+    foot.inert = false;
+    $("panel").inert = false;
+    skel?.remove();
+    watch();
+    if (!from.length) return;
+    let k = 0;
+    for (const [t, r] of nearby(tiles.filter((x) => !x.hidden))) {
+      if (!onScreen(r)) continue;
+      const b = from[k++];
+      if (!b) break;
+      t.animate([{ transform: flipFrom(b, r) }, { transform: "none" }], { duration: 420, easing: EASE });
+    }
   }
 
   const loading = $("loading");
@@ -578,19 +691,18 @@
     buildWall();
     buildPeople();
     buildHold();
-    loading.hidden = true;
-    foot.inert = false;
+    load();
+    state.phase = "ready";
+    render();
     rememberLater();
-  }).catch(() => { // say so, and offer another go
-    const p = loading.querySelector("p");
-    p.textContent = "The photos didn’t load.";
-    p.classList.remove("sr");
-    loading.classList.add("failed");
-    tryAgain.hidden = false;
+  }).catch((e) => {
+    if (state.phase === "ready") throw e; // a bug after mounting is not a failed download
+    state.phase = "error";
+    render();
   });
 
   // for the panel, the hold and the tests
   window.armful = { thumbUrl, faceUrl, bigUrl, wallSize, setShown, layout, updateCounts, panelOpen,
-    state, matches, countFor, toggle, setAny, clear, renderPair,
+    state, render, matches, countFor, toggle, setAny, clear, renderPair,
     get D() { return D; }, get tiles() { return tiles; }, get tilesOf() { return tilesOf; } };
 })();

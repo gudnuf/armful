@@ -3,6 +3,7 @@
 // Loopback only; a path (after symlinks) must stay inside the root it was served from.
 // headers: extra response headers, e.g. { "content-security-policy": ... }, either one object for
 // every response or a function (file path) -> object, for headers on some files only.
+// delay: { "data.json": 800 } holds those files back that many ms (a slow data source).
 import { createServer } from "node:http";
 import { readFile, realpath } from "node:fs/promises";
 import { join, normalize, extname, dirname, sep } from "node:path";
@@ -12,7 +13,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript",
   ".json": "application/json", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
 
-export function serve({ site = join(ROOT, "site"), fixture = join(ROOT, "test", "fixture"), headers = {} } = {}) {
+export function serve({ site = join(ROOT, "site"), fixture = join(ROOT, "test", "fixture"), headers = {}, delay = {} } = {}) {
   const server = createServer(async (req, res) => {
     let rel;
     try {
@@ -26,6 +27,7 @@ export function serve({ site = join(ROOT, "site"), fixture = join(ROOT, "test", 
       const [root, file] = await Promise.all([realpath(dir), realpath(join(dir, rel))]);
       if (!file.startsWith(root + sep)) { res.writeHead(403).end(); return; }
       const body = await readFile(file);
+      if (delay[rel]) await new Promise((r) => setTimeout(r, delay[rel]));
       const extra = typeof headers === "function" ? headers(file) || {} : headers;
       res.writeHead(200, { "content-type": TYPES[extname(file)] || "application/octet-stream", "cache-control": "no-store", ...extra }).end(body);
     } catch { if (!res.headersSent) res.writeHead(404).end(); }

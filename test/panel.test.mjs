@@ -150,6 +150,7 @@ test("desktop: header top-left, the pill bottom-left, the rail a narrow column a
   const pill = await rect("#people");
   await click("#people");
   assert.ok(await b.until(`document.getElementById('list').getClientRects().length > 0`), "click opens");
+  await sleep(500); // past the rail's rise
   const list = await rect("#list");
   assert.ok(list.bottom <= bar.top + 1, "the rail sits above the pill");
   assert.ok(list.width <= 130, `narrow: ${list.width}`);
