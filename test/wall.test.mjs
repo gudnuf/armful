@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
-import { launch, sleep } from "./cdp.mjs";
+import { launch, sleep, STATS, statsFor } from "./cdp.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIX = join(ROOT, "test", "fixture");
@@ -298,7 +298,7 @@ test("the fixture's malformed last entry (w: 0, h: 0) is dropped: 60 tiles, no e
   assert.equal(await b.evalJs(`armful.D.files.length`), 60);
   assert.equal(await b.evalJs(`document.getElementById('loading').classList.contains('failed')`), false);
   assert.ok(!(await b.evalJs(`document.getElementById('loading').innerText`)).includes("didn’t load"));
-  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
+  assert.equal(await b.evalJs(STATS), statsFor(12, 57, 3));
   assert.deepEqual(warns, ["armful: skipped 1 malformed entries"]);
 });
 
@@ -393,13 +393,13 @@ test("the header reserves its height: the wall does not move when the numbers ar
   await b.cdp("Fetch.enable", { patterns: [{ urlPattern: "*data.json*" }] });
   try {
     await b.load(390, 844, true, url(srv), `document.readyState === 'complete'`);
-    const before = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.getElementById('stats').textContent]`);
-    assert.equal(before[2], "");
+    const before = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.querySelector('.masthead .mark').getBoundingClientRect().left, document.getElementById('stats').textContent]`);
+    assert.equal(before[3], "");
     for (const id of held.splice(0)) await b.cdp("Fetch.continueRequest", { requestId: id });
     assert.ok(await b.until(READY));
-    const after = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.getElementById('stats').textContent]`);
-    assert.deepEqual(after.slice(0, 2), before.slice(0, 2));
-    assert.equal(after[2], "12 people · 60 photos");
+    const after = await b.evalJs(`[document.querySelector('.masthead').getBoundingClientRect().height, document.getElementById('wall').getBoundingClientRect().top, document.querySelector('.masthead .mark').getBoundingClientRect().left, document.getElementById('stats').textContent]`);
+    assert.deepEqual(after.slice(0, 3), before.slice(0, 3), "header height, wall top and wordmark unmoved");
+    assert.equal(await b.evalJs(STATS), statsFor(12, 57, 3));
   } finally { await b.cdp("Fetch.disable"); off(); }
 });
 

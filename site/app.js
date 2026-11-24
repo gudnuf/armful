@@ -274,6 +274,12 @@
   // default) or with any of them (any: a tap on the held faces, unannounced). The URL keeps it:
   // #p=3.7 / #p=3.7&any ----
   const plural = (n, w) => `${nf(n)} ${w}${n === 1 ? "" : "s"}`;
+  // the header's count cells: a small icon (person, photo, play) and the number
+  const statIcon = {
+    p: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="3.6" r="2.3"/><path d="M1.6 11.2c0-2.6 2-4.3 4.4-4.3s4.4 1.7 4.4 4.3z"/></svg>',
+    f: '<svg viewBox="0 0 12 12" aria-hidden="true"><path fill-rule="evenodd" d="M1 2.2h10v7.6H1zM2.2 8.6h7.6L7.4 5.2 5.6 7.4 4.4 6.2z"/></svg>',
+    v: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.8l7.2 4.2L3 10.2z"/></svg>' };
+  const statCell = (k, n) => `<span class="st st-${k}" aria-hidden="true">${statIcon[k]}${nf(n)}</span>`;
   // which files have everyone in `sel` (together) or anyone in it (any); nobody held: every file
   function matches(sel, any) {
     if (!sel.size) return D.files.map(() => true);
@@ -331,7 +337,14 @@
     // the header follows the wall: the files shown, and everyone in the list who is in them
     let inShown = 0;
     for (const pid of tally.keys()) if (byId.has(pid)) inShown++;
-    setText($("stats"), `${nf(inShown)} ${inShown === 1 ? "person" : "people"} · ${plural(shownN, "photo")}`);
+    // icons instead of words, so long counts never clip; the words go on aria-label
+    let vids = 0;
+    ok.forEach((y, i) => { if (y && D.files[i].v) vids++; });
+    const pics = shownN - vids, st = $("stats");
+    const words = `${nf(inShown)} ${inShown === 1 ? "person" : "people"} · ${plural(pics, "photo")}` + (vids ? ` · ${plural(vids, "video")}` : "");
+    const html = statCell("p", inShown) + statCell("f", pics) + (vids ? statCell("v", vids) : "");
+    if (st.dataset.h !== html) { st.innerHTML = html; st.dataset.h = html; }
+    setAttr(st, "aria-label", words);
     const pair = $("pair");
     renderPair(pair);
     pair.classList.toggle("tight", !state.any);

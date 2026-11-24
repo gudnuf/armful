@@ -11,6 +11,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CH = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// the header's counts, read the way they are drawn: the words on aria-label, then each icon
+// cell as "<icon> <number>" (p person, f photo, v play), e.g.
+// "12 people · 57 photos · 3 videos [p 12, f 57, v 3]"; a cell without its icon reads "?"
+export const STATS = `(() => { const e = document.getElementById('stats');
+  const cells = [...e.querySelectorAll(':scope > .st')].map((c) => (c.querySelector(':scope > svg') ? c.className.replace(/.*st-(\\w).*/, '$1') : '?') + ' ' + c.textContent);
+  return (e.getAttribute('aria-label') || '') + ' [' + cells.join(', ') + ']'; })()`;
+// the same string for given counts
+export const statsFor = (people, photos, videos = 0) => {
+  const n = (x) => x.toLocaleString("en"), w = (x, one, many) => `${n(x)} ${x === 1 ? one : many}`;
+  const label = `${w(people, "person", "people")} · ${w(photos, "photo", "photos")}` + (videos ? ` · ${w(videos, "video", "videos")}` : "");
+  return `${label} [p ${n(people)}, f ${n(photos)}` + (videos ? `, v ${n(videos)}` : "") + "]";
+};
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const deadline = (p, ms, what) => {
   let t;

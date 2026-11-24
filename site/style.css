@@ -108,6 +108,10 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .mark svg { width: 72px; height: auto; fill: currentColor; }
 /* the numbers sit at the right edge and follow the wall (app.js); reserved width, tabular figures */
 .stats { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 172px; }
+/* each count: an icon and the number (the words are on the element's aria-label) */
+.st { display: inline-flex; align-items: center; gap: 4px; vertical-align: top; }
+.st + .st { margin-left: 12px; }
+.st svg { width: 11px; height: 11px; fill: currentColor; opacity: .7; flex: none; }
 
 /* the people: one compact pill bottom-left (every width), without words. Nobody held: three faces
    and a chevron. Someone held: their faces, a chevron and ×. The pill opens a narrow rail of faces up

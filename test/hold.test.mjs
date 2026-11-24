@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
-import { launch } from "./cdp.mjs";
+import { launch, STATS, statsFor } from "./cdp.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const READY = `document.querySelectorAll('#wall .tile').length === 60 && document.getElementById('loading').hidden`;
@@ -35,8 +35,8 @@ const face = async (pid) => { await openList(); await tap(`#list .face[data-pid=
 const NO_HINTS = /together|\bany\b|tap|narrow|separate|overlap/i;
 // no hint anywhere in the panel (the empty state's one plain sentence is checked on its own)
 const noHints = async () => assert.doesNotMatch(await b.evalJs(`document.getElementById('panel').textContent`), NO_HINTS);
-// "N people · M photos" for the files `idx`: M of them, N distinct people in them
-const stats = (idx) => { const n = new Set(idx.flatMap((i) => D.files[i].p)).size; return `${n} ${n === 1 ? "person" : "people"} · ${idx.length} photo${idx.length === 1 ? "" : "s"}`; };
+// the header for the files `idx`: N distinct people in them, their photos and videos
+const stats = (idx) => { const v = idx.filter((i) => D.files[i].v).length; return statsFor(new Set(idx.flatMap((i) => D.files[i].p)).size, idx.length - v, v); };
 const NO_TEXT = `(() => { const out = []; const w = document.createTreeWalker(document.getElementById('bar'), NodeFilter.SHOW_TEXT);
     for (let n; (n = w.nextNode());) { if (!n.textContent.trim()) continue; const r = document.createRange(), box = n.parentElement.getBoundingClientRect(); r.selectNodeContents(n);
       if (box.width > 1 && box.height > 1 && [...r.getClientRects()].some((x) => x.width > 1 && x.height > 1)) out.push(n.textContent.trim()); } return out; })()`;
@@ -64,8 +64,8 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal(await visible("#pair"), true);
   assert.equal(await text("peopleLabel"), `${with1.length} photos`);
   // the header follows the wall: the files shown, and the people in them
-  assert.equal(await text("stats"), stats(with1), "the header counts the held files");
-  assert.equal(await text("stats"), "11 people · 30 photos");
+  assert.equal(await b.evalJs(STATS), stats(with1), "the header counts the held files");
+  assert.equal(await b.evalJs(STATS), statsFor(11, 28, 2));
   assert.equal(await b.evalJs(`document.getElementById('people').getAttribute('aria-label')`), `People filter, 1 held, ${with1.length} photos`);
   assert.deepEqual(await b.evalJs(NO_TEXT), [], "the pill shows no words");
   await noHints();
@@ -83,7 +83,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal(await hash(), "#p=1.2");
   assert.deepEqual(await shown(), filesWith((p) => p.includes(1) && p.includes(2)));
   assert.equal(await text("peopleLabel"), "9 photos");
-  assert.equal(await text("stats"), stats(filesWith((p) => p.includes(1) && p.includes(2))), "the header: together");
+  assert.equal(await b.evalJs(STATS), stats(filesWith((p) => p.includes(1) && p.includes(2))), "the header: together");
   assert.deepEqual(await b.evalJs(NO_TEXT), [], "the pill shows no words");
   await noHints();
   assert.equal(await b.evalJs(`document.getElementById('pair').classList.contains('tight')`), true);
@@ -94,7 +94,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   await tap("#pair");
   const any12 = filesWith((p) => p.includes(1) || p.includes(2));
   assert.equal(await text("peopleLabel"), `${any12.length} photos`);
-  assert.equal(await text("stats"), stats(any12), "the header: any");
+  assert.equal(await b.evalJs(STATS), stats(any12), "the header: any");
   await noHints();
   assert.equal(await hash(), "#p=1.2&any");
   assert.deepEqual(await shown(), any12);
@@ -112,7 +112,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal(await b.evalJs(`document.querySelector('#empty p').textContent`), "No photos of them together");
   assert.equal(await b.evalJs(`document.querySelector('#empty button').textContent`), "clear");
   assert.equal(await text("peopleLabel"), "0 photos");
-  assert.equal(await text("stats"), "0 people · 0 photos");
+  assert.equal(await b.evalJs(STATS), statsFor(0, 0));
   await noHints();
   await tap("#empty button");
   assert.equal(await hash(), "");
@@ -132,7 +132,7 @@ test("phone: one held, together, any, the empty state, letting go, clearing", as
   assert.equal(await visible("#pair"), false);
   assert.equal(await visible("#clear"), false);
   assert.equal(await text("peopleLabel"), "12 people");
-  assert.equal(await text("stats"), "12 people · 60 photos", "cleared: the whole collection again");
+  assert.equal(await b.evalJs(STATS), statsFor(12, 57, 3), "cleared: the whole collection again");
   for (const p of D.people) assert.equal(await count(p.id), String(p.n));
 });
 

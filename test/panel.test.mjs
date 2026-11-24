@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
-import { launch, sleep } from "./cdp.mjs";
+import { launch, sleep, STATS, statsFor } from "./cdp.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const READY = `document.querySelectorAll('#wall .tile').length === 60 && document.getElementById('loading').hidden`;
@@ -61,7 +61,7 @@ test("phone: a header, a compact pill bottom-left; the rail is a narrow column u
   const mark = await rect(".masthead .mark svg");
   assert.ok(Math.abs(mark.width - 72) <= 1 && mark.left <= 24, `wordmark ${JSON.stringify(mark)}`);
   assert.equal(await b.evalJs(`document.querySelector('.masthead .mark').getAttribute('href')`), "/");
-  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
+  assert.equal(await b.evalJs(STATS), statsFor(12, 57, 3));
   assert.ok(Math.abs((await rect("#stats")).top + (await rect("#stats")).height / 2 - (mark.top + mark.height / 2)) <= 3, "one line");
   await rightAligned(390);
   assert.equal(await b.evalJs(`document.querySelector('#panel .mark, #slug')`), null, "no wordmark or slug in the panel");
@@ -157,7 +157,7 @@ test("phone: the rail stays open while the wall scrolls and opens photos; only t
 
 test("desktop: header top-left, the pill bottom-left, the rail a narrow column above it", async () => {
   await b.load(1440, 900, false, "/example/", READY);
-  assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
+  assert.equal(await b.evalJs(STATS), statsFor(12, 57, 3));
   await rightAligned(1440);
   assert.ok((await rect(".masthead .mark")).left <= 24);
   const bar = await rect("#bar");
@@ -205,7 +205,7 @@ test("uncertain people (x, from a debugging build) are ignored: not listed, not 
     try {
       await b.navigate(`${s2.url}/example/`);
       assert.ok(await b.until(READY), "page ready");
-      assert.equal(await b.evalJs(`document.getElementById('stats').textContent`), "12 people · 60 photos");
+      assert.equal(await b.evalJs(STATS), statsFor(12, 57, 3));
       assert.equal(await b.evalJs(`document.getElementById('peopleLabel').textContent`), "12 people");
       assert.equal(await b.evalJs(`document.querySelector('.face[data-pid="99"]')`), null);
       assert.equal(await b.evalJs(`armful.D.people.some((p) => p.id === 99 || p.x)`), false);
