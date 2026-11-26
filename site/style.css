@@ -157,7 +157,13 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 .clearAll:not(.on) { visibility: hidden; pointer-events: none; }
 .clearAll:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
 .list > .clearAll { align-self: flex-start; }
-.filters > .clearAll { position: absolute; top: 8px; right: 10px; z-index: 1; }
+/* the filters card's top right: clear all, then the view's link (always there, so it never moves) */
+.ftop { position: absolute; top: 8px; right: 10px; z-index: 1; display: flex; align-items: center; gap: 2px; }
+.lnk { all: unset; box-sizing: border-box; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  color: var(--dim); touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform var(--press-t) ease-out; }
+.lnk svg { width: 18px; height: 18px; }
+.lnk:active { transform: scale(var(--press)); }
+.lnk:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
 .chevb:focus-visible { outline: 2.5px solid var(--ring); outline-offset: 0; }
 .chevb .chev { transform: rotate(180deg); }
 .chevb[aria-expanded="true"] .chev { transform: none; }
@@ -311,6 +317,46 @@ body.lbOpen .scrub { visibility: hidden; }
   background: rgba(13, 15, 14, .6); color: var(--paper); display: grid; place-items: center;
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .tile .play svg { width: 18px; height: 18px; }
+/* select mode: a ring on every tile's top right corner, a filled check on the chosen ones, whose
+   photo draws in a little (a transform: the box, and so the wall, never moves) */
+.tile, .tile img { -webkit-touch-callout: none; }
+body.selecting .tile { -webkit-user-select: none; user-select: none; }
+body.selecting .tile img { transition: opacity var(--fade), transform var(--spring), border-radius var(--spring); transition-delay: 0ms; }
+body.selecting .tile::after { content: ""; position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 50%; box-sizing: border-box;
+  border: 1.5px solid var(--paper); background: rgba(13, 15, 14, .28) no-repeat center / 16px 16px; box-shadow: 0 1px 4px rgba(13, 15, 14, .3); pointer-events: none; }
+body.selecting .tile.sel::after { border-color: var(--paper); background-color: var(--ink);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6.5 12.5l3.6 3.6 7.4-8' stroke='%23FBFAF7' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E"); }
+body.selecting .tile.sel img { transform: scale(.9); border-radius: 6px; }
+body.selecting .tile.sel { background: var(--line); }
+/* the select bar takes the pill's place (the pill is hidden, its box kept) */
+body.selecting #bar { visibility: hidden; }
+body.selecting .list, body.selecting .filters { display: none; }
+.selbar { z-index: 10; gap: 4px; padding: 4px 6px 4px 4px; }
+.selN { min-width: 56px; padding: 0 6px; font: 600 15px/20px var(--sans); font-variant-numeric: tabular-nums; text-align: left; white-space: nowrap; }
+.sbtn { all: unset; box-sizing: border-box; position: relative; cursor: pointer; flex: none; width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--text); touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  transition: transform var(--press-t) ease-out, opacity var(--fade); }
+.sbtn svg { width: 22px; height: 22px; }
+.sbtn:active { transform: scale(var(--press)); }
+.sbtn:focus-visible { outline: 2.5px solid var(--ring); outline-offset: -2px; }
+.sbtn[aria-disabled="true"] { opacity: .3; cursor: default; }
+/* fetching a file: the glyph dims and a thin ring fills round the button (--p, 0 to 1; no box changes) */
+.busy svg { opacity: .35; }
+.busy::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(currentColor calc(var(--p, .08) * 1turn), rgba(127, 127, 127, .25) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); }
+.busy.spin::after { background: conic-gradient(currentColor .2turn, rgba(127, 127, 127, .25) 0); animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(1turn); } }
+/* a file fetched but the share sheet wanted a fresh tap: a small dot says it is ready */
+.ready::before { content: ""; position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+/* one quiet line ("link copied"), over everything, fixed: it never moves a thing */
+.toast { position: fixed; z-index: 40; left: 50%; bottom: calc(max(14px, var(--sb)) + 66px); max-width: calc(100vw - 32px); margin: 0;
+  padding: 8px 14px; border-radius: 999px; background: var(--ink); color: var(--paper); font: 500 13px/20px var(--sans); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; transform: translateX(-50%) translateY(6px); opacity: 0; pointer-events: none;
+  transition: opacity var(--fade), transform var(--fade); box-shadow: 0 4px 16px rgba(13, 15, 14, .2); }
+.toast.on { opacity: 1; transform: translateX(-50%); }
+@media (prefers-color-scheme: dark) { .toast { background: var(--cream); color: var(--ink); } }
 
 /* the first paint (static HTML, before any script or data): the header's numbers, the pill and
    the wall as quiet blocks of the shapes they will take. The wall's blocks use the tiles' own row
@@ -403,6 +449,9 @@ body.lbOpen { overflow: hidden; }
 .lbCount { margin: 0 auto 0 0; padding: 14px 4px; font-variant-numeric: tabular-nums; pointer-events: none;
   text-shadow: 0 1px 6px rgba(13, 15, 14, .6); }
 #lbDrive { position: absolute; right: 0; top: 54px; } /* wide screens: download sits under close, clear of the photo */
+#lbShare { position: absolute; right: 0; top: 108px; } /* then share the file, then the link */
+#lbLink { position: absolute; right: 0; top: 162px; }
+.lbTop .icon { position: relative; }
 /* the held faces, small at the bottom centre */
 .lbHold { position: absolute; left: 50%; bottom: calc(max(18px, var(--sb)) + 4px); transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; pointer-events: none; white-space: nowrap; max-width: calc(100vw - 136px); }
@@ -417,7 +466,7 @@ body.lbOpen { overflow: hidden; }
   .lbStage { --mw: 100vw; --mh: 100vh; --mh: 100dvh; }
   .lbNav { top: auto; bottom: max(18px, var(--sb)); margin-top: 0; }
   .lbTop { top: max(10px, var(--st)); left: max(12px, var(--sl)); right: max(12px, var(--sr)); align-items: center; }
-  #lbDrive { position: static; }
+  #lbDrive, #lbShare, #lbLink { position: static; }
 }
 
 @media (prefers-reduced-motion: reduce) {

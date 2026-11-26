@@ -36,6 +36,8 @@
   <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M4.5 6h15l-5.8 6.9v4.6l-3.4 1.7v-6.3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" fill="none"/></symbol>
   <symbol id="i-port" viewBox="0 0 24 24"><rect x="7.5" y="4.5" width="9" height="15" rx="1.6" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
   <symbol id="i-land" viewBox="0 0 24 24"><rect x="3.5" y="7" width="17" height="10" rx="1.6" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5v11M8 7.5l4-4 4 4M8.5 10.5H7a1.5 1.5 0 0 0-1.5 1.5v6.5A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.5-1.5V12a1.5 1.5 0 0 0-1.5-1.5h-1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3-3a3.6 3.6 0 0 0-5.1-5.1l-1.1 1.1M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3 3a3.6 3.6 0 0 0 5.1 5.1l1.1-1.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v10m-4.5-4.5L12 15l4.5-4.5M6 19h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
 </svg>
 
@@ -47,7 +49,7 @@
 <aside id="panel" class="panel" aria-label="People and filters" inert>
   <div id="list" class="list" hidden><button class="clearAll" type="button" tabindex="-1">clear all</button><ol id="listMain"></ol></div>
   <div id="filters" class="filters" role="group" aria-label="Filters" hidden>
-    <button class="clearAll" type="button" tabindex="-1">clear all</button>
+    <div class="ftop"><button class="clearAll" type="button" tabindex="-1">clear all</button><button id="viewLink" class="lnk" type="button" aria-label="Share this view" title="Share this view"><svg aria-hidden="true"><use href="#i-link"/></svg></button></div>
     <section class="frow"><p class="lbl" id="lblN">People in the photo</p><div class="opts" id="optN" role="group" aria-labelledby="lblN"></div></section>
     <section class="frow" id="rowD"><p class="lbl" id="lblD">Day of the trip</p><div class="opts days" id="optD" role="group" aria-labelledby="lblD"></div>
       <div id="partsWrap" class="partsWrap" inert><div><div class="opts" id="optP" role="group" aria-label="Part of the day"></div></div></div></section>
@@ -61,6 +63,14 @@
     <button id="clear" class="x" type="button" aria-label="Clear everything" hidden><svg aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
 </aside>
+<!-- select mode: in the pill's place, the count, share, save and × -->
+<div id="selbar" class="bar selbar" role="toolbar" aria-label="Selected" hidden>
+  <button id="selX" class="x" type="button" aria-label="Done selecting"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+  <span id="selN" class="selN" aria-live="polite">0</span>
+  <button id="selShare" class="sbtn" type="button" aria-label="Share selected" title="Share"><svg aria-hidden="true"><use href="#i-share"/></svg></button>
+  <button id="selSave" class="sbtn" type="button" aria-label="Save selected" title="Save"><svg aria-hidden="true"><use href="#i-down"/></svg></button>
+</div>
+<p id="toast" class="toast" role="status" aria-live="polite"></p>
 
 <main id="wall" class="wall" aria-label="Photos"></main>
 <!-- the first paint: a wall of cream blocks the real tiles grow out of when the data arrives -->
@@ -131,6 +141,8 @@
   <div id="lbHold" class="lbHold" hidden><span id="lbPair" class="pair tight"></span><span id="lbLine" class="lbl light"></span></div>
   <div class="lbTop">
     <p id="lbCount" class="lbCount lbl light" aria-live="polite"></p>
+    <button id="lbLink" class="icon" type="button" title="Share this view" aria-label="Share this view"><svg aria-hidden="true"><use href="#i-link"/></svg></button>
+    <button id="lbShare" class="icon" type="button" title="Share" aria-label="Share"><svg aria-hidden="true"><use href="#i-share"/></svg></button>
     <a id="lbDrive" class="icon" target="_blank" rel="noopener noreferrer" title="Original in Google Drive" aria-label="Original in Google Drive"><svg aria-hidden="true"><use href="#i-down"/></svg></a>
     <button id="lbClose" class="icon" title="Close" aria-label="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>

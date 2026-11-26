@@ -173,6 +173,8 @@ export async function onRequest({ request, env, next }) {
 
   if (!cookies(request, name).some((v) => same(v, want))) return door(401, false, await doorOpts(env, request, slug));
 
+  if (url.pathname.startsWith(`/${slug}/__file/`)) return fileProxy(request, env, slug, url.pathname.slice(`/${slug}/__file/`.length));
+
   const res = await next();
   const out = new Response(res.body, res);
   out.headers.set("X-Robots-Tag", NOINDEX);
@@ -187,12 +189,86 @@ export async function onRequest({ request, env, next }) {
   return out;
 }
 
+// ---- __file/<id>: one of this collection's videos, streamed from Drive (behind the gate above) ----
+// The page shares and saves the real file; photos it fetches from Google's image server directly
+// (lh3 answers CORS), but Drive refuses a cross-site browser fetch of a video's bytes, so they come
+// through here. Only GET / HEAD; only an id that is a video in this collection's own data.json
+// (anything else is 404: there is no URL or host in the request, only the id); the upstream URL is
+// fixed; the body is streamed through, never buffered; a Drive error or HTML page is a 502.
+const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/;
+const UPSTREAM = "https://drive.usercontent.google.com";
+const VIDEOS_TTL = 60000;
+const videos = new Map(); // slug -> { at, ids: Map(id -> position in data.json) }, per isolate
+async function videoIds(env, request, slug) {
+  const hit = videos.get(slug);
+  if (hit && Date.now() - hit.at < VIDEOS_TTL) return hit.ids;
+  const ids = new Map();
+  try {
+    const r = await env.ASSETS.fetch(new URL(`/${slug}/data.json`, request.url));
+    if (r.ok) {
+      const d = await r.json();
+      (Array.isArray(d?.files) ? d.files : []).forEach((f, k) => {
+        if (f && f.v && typeof f.i === "string" && FILE_ID.test(f.i)) ids.set(f.i, k);
+      });
+    }
+  } catch {}
+  videos.set(slug, { at: Date.now(), ids });
+  return ids;
+}
+// tests point the upstream at a local stand-in; nothing but loopback is ever honoured
+function upstreamOf(env) {
+  const u = env.ARMFUL_FILE_UPSTREAM;
+  return typeof u === "string" && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(u) ? u : UPSTREAM;
+}
+// the container's type from its first bytes (Drive says application/octet-stream)
+function videoType(h) {
+  const tag = (o) => String.fromCharCode(...h.slice(o, o + 4));
+  if (h.length >= 12 && tag(4) === "ftyp") return tag(8) === "qt  " ? ["video/quicktime", "mov"] : ["video/mp4", "mp4"];
+  if (h.length >= 4 && h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3) return ["video/webm", "webm"];
+  return ["application/octet-stream", "bin"];
+}
+export async function fileProxy(request, env, slug, id) {
+  const base = { "Cache-Control": "private, no-store", "Vary": "Cookie", "X-Robots-Tag": NOINDEX, "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff" };
+  const plain = (status, extra = {}) => new Response(null, { status, headers: { ...base, ...extra } });
+  if (request.method !== "GET" && request.method !== "HEAD") return plain(405, { Allow: "GET, HEAD" });
+  if (!FILE_ID.test(id)) return plain(404);
+  const at = (await videoIds(env, request, slug)).get(id);
+  if (at === undefined) return plain(404);
+  const range = request.headers.get("Range") || "";
+  const up = await fetch(`${upstreamOf(env)}/download?id=${encodeURIComponent(id)}&export=download&confirm=t`, {
+    headers: /^bytes=\d{0,15}-\d{0,15}$/.test(range) ? { Range: range } : {}, redirect: "follow",
+  }).catch(() => null);
+  if (!up || (up.status !== 200 && up.status !== 206) || /text\/html/i.test(up.headers.get("Content-Type") || "")) {
+    try { await up?.body?.cancel(); } catch {}
+    return plain(502);
+  }
+  const headers = { ...base, "Accept-Ranges": "bytes" };
+  for (const k of ["Content-Length", "Content-Range"]) { const v = up.headers.get(k); if (v && /^[\w\s\/*-]+$/.test(v)) headers[k] = v; }
+  // peek at the first chunk for the type and the name; then the rest flows straight through
+  const reader = up.body ? up.body.getReader() : null;
+  const first = reader ? await reader.read() : { done: true };
+  const head = first.done ? new Uint8Array(0) : first.value;
+  const [type, ext] = range && up.status === 206 && !/^bytes 0-/.test(headers["Content-Range"] || "") ? ["application/octet-stream", "bin"] : videoType(head);
+  headers["Content-Type"] = type;
+  headers["Content-Disposition"] = `attachment; filename="${slug}-${String(at + 1).padStart(4, "0")}.${ext}"`;
+  if (request.method === "HEAD" || !reader) { try { await reader?.cancel(); } catch {} return new Response(null, { status: up.status, headers }); }
+  const body = new ReadableStream({
+    start(c) { if (!first.done) c.enqueue(first.value); },
+    async pull(c) { const { done, value } = await reader.read(); if (done) c.close(); else c.enqueue(value); },
+    cancel(why) { return reader.cancel(why); },
+  });
+  return new Response(body, { status: up.status, headers });
+}
+
 // The collection page (behind the gate; the door sets its own): own scripts only, Drive
 // thumbnails (drive.google.com redirects to *.googleusercontent.com) and the Drive video iframe.
 export const PAGE_CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
   "img-src 'self' https://drive.google.com https://*.googleusercontent.com data:", "font-src 'self'",
-  "connect-src 'self'", "frame-src https://drive.google.com",
+  // connect-src: the page fetches full-size photos from Google's image server to share or save them
+  // (a video's bytes come through the gated __file/ on 'self')
+  "connect-src 'self' https://lh3.googleusercontent.com", "frame-src https://drive.google.com",
   "media-src https://drive.google.com https://*.googleusercontent.com",
   "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'",
 ].join("; ");

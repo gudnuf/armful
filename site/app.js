@@ -578,14 +578,19 @@
   }
   const filterKey = () => JSON.stringify([state.picked, state.n, state.d, state.part, state.m, state.s]);
   // the URL keeps the query: #p=3.7&n=4&d=3e&m=v&s=p (each part only when chosen)
-  function save() {
+  // (a shared link adds o=<drive id>: the photo open in the previewer; it opens once, then leaves the URL)
+  function hashOf(open) {
     const h = [];
     if (state.picked.length) h.push(`p=${state.picked.join(".")}`);
     if (state.n != null) h.push(`n=${state.n}`);
     if (state.d != null) h.push(`d=${state.d}${state.part || ""}`);
     if (state.m) h.push(`m=${state.m}`);
     if (state.s) h.push(`s=${state.s}`);
-    const s = h.length ? "#" + h.join("&") : "";
+    if (open) h.push(`o=${open}`);
+    return h.length ? "#" + h.join("&") : "";
+  }
+  function save() {
+    const s = hashOf();
     if (s !== location.hash) history.replaceState(history.state, "", s || location.pathname + location.search);
   }
   // the query from the URL: unknown, hidden or malformed parts are dropped silently
@@ -603,6 +608,19 @@
     state.part = state.d != null && dm[2] ? dm[2] : null;
     state.m = ["v", "f"].includes(kv.get("m")) ? kv.get("m") : null;
     state.s = ["p", "l"].includes(kv.get("s")) ? kv.get("s") : null;
+    const o = kv.get("o") || "";
+    wantOpen = /^[A-Za-z0-9_-]{1,200}$/.test(o) ? o : "";
+  }
+  // a link's open photo (o=): opened in the previewer once the wall shows the query; the URL then
+  // drops it (the previewer's own history entry is on top, so Back closes it, as ever)
+  let wantOpen = "";
+  function openWanted() {
+    const id = wantOpen;
+    wantOpen = "";
+    if (!id) return;
+    save();
+    const i = D.files.findIndex((f) => f.i === id);
+    if (i >= 0 && !tiles[i].hidden) lbOpen(i);
   }
   function toggle(pid) {
     const k = state.picked.indexOf(pid);
@@ -646,7 +664,7 @@
     $("clear").onclick = clear;
     for (const c of document.querySelectorAll("#panel .clearAll")) c.onclick = clear;
     $("empty").querySelector("button").onclick = clear;
-    addEventListener("hashchange", () => { load(); render(); });
+    addEventListener("hashchange", () => { load(); if (wantOpen) lbClose(); render(); openWanted(); });
   }
 
   // ---- the day labels: each names its day and the part of the day of the row under it ----
@@ -913,6 +931,283 @@
     $("lb").addEventListener("touchcancel", end, { passive: true });
   }
 
+  // ---- sharing: the real file (the previewer, a selection) and the link to this view ----
+  // Photos come straight from Google's image server at full size (lh3 …=s0 answers CORS with
+  // Access-Control-Allow-Origin: *). Videos come through this collection's own __file/<id>, a
+  // gated Pages Function that streams the Drive original (drive.usercontent.google.com refuses
+  // a cross-site fetch from a browser). Both need nothing but the visitor's own cookie.
+  const SHARE_MAX = 30; // files in one selection
+  const SHARE_BYTES = 250 * 2 ** 20; // what one share may hold in memory; past it, files download instead
+  const fileUrl = (f) => (D?.thumbs?.file ? fill(D.thumbs.file, "i", f.i)
+    : f.v ? `__file/${encodeURIComponent(f.i)}` : `https://lh3.googleusercontent.com/d/${encodeURIComponent(f.i)}=s0`);
+  const sameOrigin = (u) => new URL(u, location.href).origin === location.origin;
+  const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/heic": "heic", "image/heif": "heif", "image/webp": "webp", "image/gif": "gif",
+    "image/svg+xml": "svg", "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm" };
+  // the type from the first bytes, when the server only says octet-stream
+  function sniff(h) {
+    const at = (o, t) => [...t].every((c, k) => h[o + k] === c.charCodeAt(0));
+    if (h[0] === 0xff && h[1] === 0xd8) return "image/jpeg";
+    if (at(1, "PNG")) return "image/png";
+    if (at(4, "ftyp")) {
+      const brand = String.fromCharCode(...h.slice(8, 12));
+      if (/^(heic|heix|hevc|mif1|msf1)$/.test(brand)) return "image/heic";
+      return brand === "qt  " ? "video/quicktime" : "video/mp4";
+    }
+    if (at(0, "RIFF") && at(8, "WEBP")) return "image/webp";
+    return "";
+  }
+  const pad = (n) => String(n).padStart(String(D.files.length).length, "0");
+  const fileName = (i, type) => `${slug}-${pad(i + 1)}.${EXT[type] || (D.files[i].v ? "mp4" : "jpg")}`;
+  const sizeOf = (r) => { const n = +r.headers.get("content-length"); return Number.isFinite(n) && n > 0 ? n : 0; };
+  // the whole file as a File, with progress (0..1, or -1 when the size is unknown); rejects on any
+  // failure, "big" past `room` bytes (checked on the header, then while reading)
+  async function getFile(i, progress, room = SHARE_BYTES, signal) {
+    const f = D.files[i], u = fileUrl(f);
+    const r = await fetch(u, { credentials: sameOrigin(u) ? "same-origin" : "omit", referrerPolicy: "no-referrer", signal });
+    if (!r.ok) throw new Error(`file ${r.status}`);
+    if (/text\/html/i.test(r.headers.get("content-type") || "")) throw new Error("file: not a file");
+    const total = sizeOf(r);
+    if (total > room) { try { r.body?.cancel(); } catch {} throw Object.assign(new Error("big"), { big: true }); }
+    const parts = [];
+    let got = 0;
+    if (r.body && r.body.getReader) {
+      const rd = r.body.getReader();
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        parts.push(value); got += value.byteLength;
+        if (got > room) { try { rd.cancel(); } catch {} throw Object.assign(new Error("big"), { big: true }); }
+        progress?.(total ? Math.min(1, got / total) : -1, value.byteLength);
+      }
+    } else parts.push(new Uint8Array(await r.arrayBuffer()));
+    const blob = new Blob(parts);
+    const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    let type = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!EXT[type]) type = sniff(head) || (f.v ? "video/mp4" : "image/jpeg");
+    return new File([blob], fileName(i, type), { type });
+  }
+  const canFiles = (files) => { try { return !!navigator.canShare && !!navigator.share && navigator.canShare({ files }); } catch { return false; } };
+  // can this browser share files at all (asked before fetching anything)
+  const sharesFiles = () => canFiles([new File([new Uint8Array(1)], "x.jpg", { type: "image/jpeg" })]);
+  const coarse = matchMedia("(pointer: coarse)");
+  function download(href, name) {
+    const a = document.createElement("a");
+    a.href = href; a.download = name; a.rel = "noopener"; a.style.display = "none";
+    document.body.append(a); a.click(); a.remove();
+  }
+  function saveFile(file) {
+    const u = URL.createObjectURL(file);
+    download(u, file.name);
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  }
+  // a video too large to hold: the browser saves it straight from the gated stream (to disk, not memory)
+  const saveDirect = (i) => download(fileUrl(D.files[i]), "");
+  // ---- the quiet line ----
+  let toastT = 0;
+  function toast(msg) {
+    const t = $("toast");
+    setText(t, msg);
+    t.classList.add("on");
+    clearTimeout(toastT);
+    toastT = setTimeout(() => t.classList.remove("on"), 2200);
+  }
+  // ---- a button's fetching state: the glyph dims, a ring fills (no box changes) ----
+  function busy(btn, p) {
+    if (p == null) { btn.classList.remove("busy", "spin"); btn.style.removeProperty("--p"); btn.removeAttribute("aria-busy"); return; }
+    btn.classList.add("busy");
+    btn.setAttribute("aria-busy", "true");
+    btn.classList.toggle("spin", p < 0);
+    if (p >= 0) setVar(btn, "--p", Math.max(0.08, p).toFixed(3));
+  }
+  // the share sheet; resolves "shared" | "cancelled" | "stale" (the tap's activation ran out while the
+  // files came: the next tap shares at once) | "failed"
+  async function sheet(data) {
+    try { await navigator.share(data); return "shared"; }
+    catch (e) { return e?.name === "AbortError" ? "cancelled" : e?.name === "NotAllowedError" ? "stale" : "failed"; }
+  }
+  // ---- the link to exactly this view: the query, and the photo open in the previewer ----
+  function viewUrl() {
+    const open = state.lb >= 0 ? D.files[lbSet[state.lb]]?.i : "";
+    return location.origin + location.pathname + hashOf(open);
+  }
+  async function copyLink(u) {
+    try { await navigator.clipboard.writeText(u); toast("Link copied"); }
+    catch { toast("Couldn’t copy the link"); }
+  }
+  async function shareView() {
+    const url = viewUrl();
+    if (navigator.share) {
+      const r = await sheet({ url, title: D.title || "armful" });
+      if (r === "shared" || r === "cancelled") return;
+    }
+    await copyLink(url);
+  }
+  // ---- the previewer's file: share it, or (no file sharing) the link on a phone, a download elsewhere ----
+  const held = new Map(); // drive id -> File fetched but not yet shared (a stale activation), at most 2
+  function keep(id, file) { held.delete(id); held.set(id, file); while (held.size > 2) held.delete(held.keys().next().value); }
+  let lbBusy = false;
+  async function shareOpen() {
+    if (state.lb < 0 || lbBusy) return;
+    const btn = $("lbShare"), i = lbSet[state.lb], f = D.files[i];
+    const files = sharesFiles(), mode = files ? "share" : coarse.matches && navigator.share ? "link" : "save";
+    if (mode === "link") return shareView();
+    const ready = held.get(f.i);
+    if (ready) {
+      btn.classList.remove("ready");
+      if (mode === "save") { saveFile(ready); held.delete(f.i); return; }
+      const r = await sheet({ files: [ready] });
+      if (r !== "stale") held.delete(f.i);
+      if (r === "failed") toast("Couldn’t share that");
+      return;
+    }
+    lbBusy = true;
+    busy(btn, 0);
+    let file;
+    try { file = await getFile(i, (p) => busy(btn, p)); }
+    catch (e) {
+      busy(btn); lbBusy = false;
+      if (e.big && f.v) { saveDirect(i); toast("Too large to share: saving it"); }
+      else toast("Couldn’t get the file");
+      return;
+    }
+    busy(btn); lbBusy = false;
+    if (state.lb < 0 || lbSet[state.lb] !== i) { keep(f.i, file); return; } // stepped away meanwhile
+    if (mode === "save" || !canFiles([file])) { if (mode === "share") return shareView(); saveFile(file); return; }
+    const r = await sheet({ files: [file] });
+    if (r === "stale") { keep(f.i, file); btn.classList.add("ready"); toast("Ready: tap share again"); }
+    else if (r === "failed") toast("Couldn’t share that");
+  }
+  $("lbShare").onclick = shareOpen;
+  $("lbLink").onclick = shareView;
+  $("viewLink").onclick = shareView;
+
+  // ---- select several: a long press on a tile (touch or mouse), or a shift-click, starts it;
+  // taps then add or remove; the bar in the pill's place shares or saves them; × or Esc ends it ----
+  const sel = new Set(); // file indexes, in the order chosen
+  let selecting = false, selBusy = false, selReady = null;
+  function drawSel() {
+    document.body.classList.toggle("selecting", selecting);
+    $("selbar").hidden = !selecting;
+    for (const a of tiles) {
+      const on = selecting && sel.has(+a.dataset.n);
+      if (a.classList.contains("sel") !== on) a.classList.toggle("sel", on);
+      if (selecting) setAttr(a, "aria-pressed", String(on)); else if (a.hasAttribute("aria-pressed")) a.removeAttribute("aria-pressed");
+    }
+    setText($("selN"), sel.size ? nf(sel.size) : "0");
+    setAttr($("selN"), "aria-label", `${nf(sel.size)} selected`);
+    for (const id of ["selShare", "selSave"]) setAttr($(id), "aria-disabled", String(!sel.size || selBusy));
+    if (!selReady) $("selShare").classList.remove("ready");
+  }
+  function selStart(i) {
+    if (state.phase !== "ready") return;
+    if (!selecting) { selecting = true; sel.clear(); selReady = null; if (state.railOpen) panelOpen(false); }
+    if (i != null) selToggle(i); else drawSel();
+  }
+  function selEnd() {
+    if (!selecting) return;
+    selecting = false; sel.clear(); selReady = null;
+    drawSel();
+  }
+  function selToggle(i) {
+    if (sel.has(i)) sel.delete(i);
+    else if (sel.size >= SHARE_MAX) { toast(`${SHARE_MAX} at most at once`); return; }
+    else sel.add(i);
+    selReady = null;
+    drawSel();
+  }
+  // the chosen files, fetched one after another; progress over them all on `btn`
+  async function selFiles(btn) {
+    const list = [...sel], out = [], big = [];
+    let room = SHARE_BYTES;
+    busy(btn, 0);
+    try {
+      for (let k = 0; k < list.length; k++) {
+        try {
+          const file = await getFile(list[k], (p) => busy(btn, (k + (p < 0 ? 0.5 : p)) / list.length), room);
+          room -= file.size; out.push([list[k], file]);
+        } catch (e) { if (e.big) big.push(list[k]); else throw e; }
+      }
+    } finally { busy(btn); }
+    return { out, big };
+  }
+  async function selShare() {
+    if (!sel.size || selBusy) return;
+    const btn = $("selShare");
+    if (selReady) { // fetched already; the sheet wanted a fresh tap
+      const r = await sheet({ files: selReady });
+      if (r !== "stale") { selReady = null; btn.classList.remove("ready"); }
+      if (r === "failed") toast("Couldn’t share those");
+      return;
+    }
+    if (!sharesFiles()) return selSave(); // no file sharing here: save them instead
+    selBusy = true; drawSel();
+    let got;
+    try { got = await selFiles(btn); }
+    catch { selBusy = false; drawSel(); toast("Couldn’t get the files"); return; }
+    selBusy = false; drawSel();
+    const files = got.out.map(([, f]) => f);
+    for (const i of got.big) { if (D.files[i].v) saveDirect(i); }
+    if (got.big.length) toast(`${plural(got.big.length, "file")} too large to share: saving`);
+    if (!files.length) return;
+    if (!canFiles(files)) { files.forEach((f, k) => setTimeout(() => saveFile(f), k * 250)); return; }
+    const r = await sheet({ files });
+    if (r === "stale") { selReady = files; btn.classList.add("ready"); toast("Ready: tap share again"); }
+    else if (r === "failed") toast("Couldn’t share those");
+  }
+  // save: one download after another (photos as fetched files; videos stream straight to disk)
+  async function selSave() {
+    if (!sel.size || selBusy) return;
+    const btn = $("selSave"), list = [...sel];
+    selBusy = true; drawSel();
+    let failed = 0;
+    busy(btn, 0);
+    for (let k = 0; k < list.length; k++) {
+      const i = list[k];
+      if (D.files[i].v && !D.thumbs?.file) { saveDirect(i); busy(btn, (k + 1) / list.length); await sleep(250); continue; }
+      try { saveFile(await getFile(list[k], (p) => busy(btn, (k + (p < 0 ? 0.5 : p)) / list.length), Infinity)); }
+      catch { failed++; }
+      await sleep(250);
+    }
+    busy(btn);
+    selBusy = false; drawSel();
+    toast(failed ? `${plural(failed, "file")} didn’t save` : `Saved ${plural(list.length, "file")}`);
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  $("selX").onclick = selEnd;
+  $("selShare").onclick = selShare;
+  $("selSave").onclick = selSave;
+  addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !selecting || state.lb >= 0) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    selEnd();
+  }, true);
+  // the long press: 450 ms still on a tile (a scroll or a move past 10px cancels it); the tap that ends
+  // it opens nothing, and the browser's own long-press menu stays away
+  {
+    let timer = 0, x0 = 0, y0 = 0, fired = 0;
+    const cancel = () => { clearTimeout(timer); timer = 0; };
+    $("wall").addEventListener("pointerdown", (e) => {
+      if ((e.pointerType === "mouse" && e.button) || state.phase !== "ready") return;
+      const a = e.target.closest(".tile");
+      if (!a || a.classList.contains("failed")) return;
+      x0 = e.clientX; y0 = e.clientY; cancel();
+      timer = setTimeout(() => { timer = 0; fired = Date.now(); navigator.vibrate?.(8);
+        if (selecting) selToggle(+a.dataset.n); else selStart(+a.dataset.n); }, 450);
+    });
+    $("wall").addEventListener("pointermove", (e) => { if (timer && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) cancel(); });
+    for (const t of ["pointerup", "pointercancel"]) $("wall").addEventListener(t, cancel);
+    addEventListener("scroll", cancel, { passive: true });
+    $("wall").addEventListener("contextmenu", (e) => { if (timer || Date.now() - fired < 800) { e.preventDefault(); cancel(); } });
+    // taps in select mode (and the one right after a long press) choose instead of opening
+    $("wall").addEventListener("click", (e) => {
+      const a = e.target.closest(".tile");
+      if (!a) return;
+      if (Date.now() - fired < 800) { e.preventDefault(); e.stopImmediatePropagation(); fired = 0; return; }
+      if (selecting) { e.preventDefault(); e.stopImmediatePropagation(); selToggle(+a.dataset.n); return; }
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.button) { e.preventDefault(); e.stopImmediatePropagation(); selStart(+a.dataset.n); }
+    }, true);
+  }
+
   // ---- the one render path ----
   function render() {
     if (state.phase !== drawn.phase) drawPhase();
@@ -979,7 +1274,7 @@
   function usable(d) {
     if (!d || typeof d !== "object" || !Array.isArray(d.files)) return null;
     if (d.thumbs != null && (typeof d.thumbs !== "object" ||
-        ["wall", "face", "big"].some((k) => d.thumbs[k] != null && typeof d.thumbs[k] !== "string"))) return null;
+        ["wall", "face", "big", "file"].some((k) => d.thumbs[k] != null && typeof d.thumbs[k] !== "string"))) return null;
     if (d.people != null && !Array.isArray(d.people)) return null;
     const at = new Map(), files = [];
     d.files.forEach((f, k) => { if (okFile(f)) { at.set(k, files.length); files.push(f); } });
@@ -1042,6 +1337,7 @@
     load();
     state.phase = "ready";
     render();
+    openWanted();
     rememberLater();
   }).catch((e) => {
     if (state.phase === "ready") throw e; // a bug after mounting is not a failed download
@@ -1050,7 +1346,7 @@
   });
 
   // for the panel, the hold and the tests
-  window.armful = { thumbUrl, faceUrl, bigUrl, wallSize, setShown, layout, updateCounts, panelOpen,
+  window.armful = { thumbUrl, faceUrl, bigUrl, fileUrl, viewUrl, getFile, selStart, selEnd, selToggle, get sel() { return [...sel]; }, get selecting() { return selecting; }, wallSize, setShown, layout, updateCounts, panelOpen,
     state, render, matches, countFor, toggle, clear, renderPair, openView, setQuery, evaluate, terms,
     get D() { return D; }, get tiles() { return tiles; }, get tilesOf() { return tilesOf; },
     get wallTiles() { return wallTiles; }, get days() { return { dayOf, partOf, shapeOf, facesOf, nDays }; } };
