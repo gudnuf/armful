@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cluster face embeddings into people.
 
-usage: python -I pipeline/scan/cluster.py [--thresh 0.65] [--attach]
+usage: python -I pipeline/scan/cluster.py [--thresh 0.65] [--attach [--forget-gone]]
 Core faces (good detection, big enough) are clustered with agglomerative
 average-linkage on cosine distance. Weaker faces are then attached to the
 nearest cluster centroid if similar enough (marked weak=1). Faces that upright.py could
@@ -15,6 +15,11 @@ it is; a new face joins its nearest centroid by the weak-face rule above
 (marked weak=1) or stays unclustered. Use it to add a few files to a collection
 whose people are already reviewed: a full run lets the new faces nudge old
 clusters (every file can gain or lose someone), this never touches old files.
+
+--forget-gone (with --attach): files deleted from the folder (and moved out of
+drive/) leave faces in clusters.tsv that faces.tsv no longer has; --attach
+stops on them unless this is given, which drops them from clusters.tsv. The
+centroids stay as they are, so every remaining face keeps its cluster.
 """
 import json
 import os
@@ -50,7 +55,7 @@ def load_faces():
     return rows, np.load(os.path.join(fc.DATA, "emb.npy"))
 
 
-def attach(rows, E):
+def attach(rows, E, forget_gone=False):
     """New faces onto the existing clusters; old assignments and centroids unchanged."""
     old = {}
     with open(os.path.join(fc.DATA, "clusters.tsv"), encoding="utf-8") as f:
@@ -61,8 +66,10 @@ def attach(rows, E):
     cent = np.load(os.path.join(fc.DATA, "centroids.npy"))
     known = {r["face_id"] for r in rows}
     gone = [fid for fid in old if fid not in known]
-    if gone:
-        sys.exit(f"--attach: {len(gone)} faces in clusters.tsv are no longer in faces.tsv (e.g. {gone[0]}); run a full cluster.py")
+    if gone and forget_gone:
+        print(f"--forget-gone: {len(gone)} faces of files no longer scanned dropped from clusters.tsv")
+    elif gone:
+        sys.exit(f"--attach: {len(gone)} faces in clusters.tsv are no longer in faces.tsv (e.g. {gone[0]}); run a full cluster.py, or pass --forget-gone if their files were deleted")
     out, added, joined = [], 0, 0
     for i, r in enumerate(rows):
         if r["face_id"] in old:
@@ -84,7 +91,7 @@ def attach(rows, E):
         for fid, c, s, w in out:
             f.write(f"{fid}\t{c}\t{s}\t{w}\n")
     os.replace(tmp, os.path.join(fc.DATA, "clusters.tsv"))
-    print(json.dumps(dict(n_faces=len(rows), kept=len(rows) - added, new=added, new_joined=joined, n_clusters=len(cent)), indent=1))
+    print(json.dumps(dict(n_faces=len(rows), kept=len(rows) - added, new=added, new_joined=joined, gone=len(gone), n_clusters=len(cent)), indent=1))
     print("clusters.json is not updated by --attach")
 
 
@@ -94,7 +101,7 @@ def main():
         thresh = float(sys.argv[sys.argv.index("--thresh") + 1])
     rows, E = load_faces()
     if "--attach" in sys.argv:
-        return attach(rows, E)
+        return attach(rows, E, forget_gone="--forget-gone" in sys.argv)
     core = np.array([r["det"] >= CORE_DET and r["side"] >= CORE_SIDE and not r["drop"] and r["oriented"] for r in rows])
     ci = np.where(core)[0]
     labels = np.full(len(rows), -1)

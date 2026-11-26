@@ -103,6 +103,33 @@ Adding a few files to a collection whose people are already reviewed:
   `cluster.py` run lets the new faces nudge the old clusters, so a file
   already on the wall can gain or lose a person. `--attach` never changes
   an old file.
+- Files deleted from the folder: move their originals out of `drive/` and
+  their rows out of `manifest.tsv` (keep a copy), rerun `scan.py`, then
+  `cluster.py --attach --forget-gone`, which drops their faces from
+  `clusters.tsv` and leaves every other face and the centroids as they are.
+  Person ids stay (the id map keeps them).
+
+On a metered connection, new files can come in from previews instead of
+originals:
+
+```bash
+python -I pipeline/scan/preview.py LISTING.tsv NEW_IDS.txt --ffprobe PATH   # Pillow; writes $ARMFUL_FOOTAGE/preview/
+```
+
+For each id it fetches Drive's thumbnail (the page's own `sz=w1600` URL) and
+only the start of the original by HTTP Range (refused unless the answer is
+206 with the asked-for length): a photo's first 128 KB (EXIF time and
+orientation, and the frame header's true size), a video's top-level atoms
+except `mdat` (its `moov`, found by walking the atom sizes, so a video body
+is never fetched). `preview/preview.tsv` lists them and `preview/bytes.tsv`
+every response's size. They are not originals and never go into
+`manifest.tsv`. `scan.py` detects faces on the thumbnail (a video's on its
+poster frame) with boxes scaled to the file's true size, and `build_site.py`
+reads time, orientation and size from the saved head. A file with no head
+gets the thumbnail's aspect ratio and no time. Later, download the originals
+into `drive/` under the same names: `scan.py` then scans them afresh and
+ignores their previews (the preview faces leave `faces.tsv`, so recluster:
+`--attach --forget-gone` puts the new faces on existing people).
 
 Everything the gallery scripts write is private, so a destination inside
 this checkout (after following symlinks) is refused unless git ignores it:

@@ -652,6 +652,27 @@ class TimeAndFaces(unittest.TestCase):
             self.assertIn(p["id"], d["files"][p["rep"]["f"]]["p"])
         self.assertEqual(d["tz"], "Asia/Tokyo")
 
+    def test_preview_head_stands_in_for_a_missing_original(self):
+        # preview.py: f1's original was never downloaded, only its head; f6 has both (the original wins)
+        self.photos()
+        pv = os.path.join(self.footage, "preview")
+        os.makedirs(os.path.join(pv, "head"))
+        os.remove(os.path.join(self.drive, "f1.jpg"))
+        write_jpeg(os.path.join(pv, "head", "f1.jpg"), "2026:05:07 10:00:00", "+00:00")
+        write_jpeg(os.path.join(pv, "head", "f6.jpg"), "2026:05:08 10:00:00", "+00:00")
+        write_tsv(
+            os.path.join(pv, "preview.tsv"),
+            ["id", "name", "subfolder", "kind", "w", "h", "dims", "thumb_w", "thumb_h", "thumb", "head", "remote_size"],
+            [("FAKE_ID_1", "f1.jpg", "", "photo", 1000, 800, "head", 0, 0, "", "head/f1.jpg", 9),
+             ("FAKE_ID_6", "f6.jpg", "", "photo", 1000, 800, "head", 0, 0, "", "head/f6.jpg", 9)],
+        )
+        col = self.col()
+        self.build("--collection", col, "--ffprobe", self.ffprobe)
+        by = {f["i"]: f for f in self.data(col)["files"]}
+        self.assertEqual(by["FAKE_ID_1"]["t"], utc(2026, 5, 7, 10, 0))
+        self.assertEqual(by["FAKE_ID_6"]["t"], utc(2026, 5, 6, 8, 30))
+        self.assertEqual(load(os.path.join(col, "state", "build_report.json"))["from_previews"], 1)
+
     def test_no_offset_uses_collection_zone_else_utc(self):
         self.photos()
         col = self.col(tz=None)

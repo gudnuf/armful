@@ -28,6 +28,11 @@ Steps:
    (w or h <= 0), the file's own (media_size.py: Pillow with EXIF orientation, ffprobe with
    the stream's rotation). A file whose size still cannot be told is left out of data.json
    and listed in build_report.json ("dropped"): the page never gets a w or h <= 0.
+
+Files ingested from previews only (pipeline/scan/preview.py: listed in
+$ARMFUL_FOOTAGE/preview/preview.tsv, original not in drive/) are read from their saved
+head instead of the original: a photo's first 128 KB (EXIF time, orientation, size), a
+video's atoms without mdat (ffprobe's creation time and size). No head: no time.
 """
 import json
 import os
@@ -51,7 +56,37 @@ def _need(name, what):
     return os.path.expanduser(v)
 
 DATA = os.path.join(_need("ARMFUL_SCAN_ROOT", "the folder holding the scan output (data/, crops/)"), "data")
-DRIVE = os.path.join(_need("ARMFUL_FOOTAGE", "the local copy of the collection's photos and videos (drive/ inside it)"), "drive")
+FOOTAGE = _need("ARMFUL_FOOTAGE", "the local copy of the collection's photos and videos (drive/ inside it)")
+DRIVE = os.path.join(FOOTAGE, "drive")
+PREVIEW = os.path.join(FOOTAGE, "preview")
+
+
+def preview_heads():
+    """rel -> saved head of a file ingested from previews only (preview.py), when it has one."""
+    p = os.path.join(PREVIEW, "preview.tsv")
+    out = {}
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            hdr = next(f).rstrip("\n").split("\t")
+            for line in f:
+                r = dict(zip(hdr, line.rstrip("\n").split("\t")))
+                if r.get("head"):
+                    out[os.path.join(r["subfolder"], r["name"]) if r["subfolder"] else r["name"]] = os.path.join(PREVIEW, r["head"])
+    return out
+
+
+_heads = None
+
+
+def source(rel):
+    """The file to read rel's time, orientation and size from: the original, else its preview head."""
+    global _heads
+    path = os.path.join(DRIVE, rel)
+    if os.path.exists(path):
+        return path
+    if _heads is None:
+        _heads = preview_heads()
+    return _heads.get(rel, path)
 
 
 _crop_ok = {}
@@ -69,7 +104,7 @@ def _server_crop_ok(rel):
     if os.path.splitext(rel)[1].lower() not in (".jpg", ".jpeg"):
         return False
     try:
-        with Image.open(os.path.join(DRIVE, rel)) as im:
+        with Image.open(source(rel)) as im:
             return im.getexif().get(274, 1) == 1
     except Exception:  # noqa: BLE001
         return False
@@ -336,7 +371,7 @@ def main(argv=None):
         p = pinfo[k]
         w, h = media_size.dim(p["w"]), media_size.dim(p["h"])
         if w <= 0 or h <= 0:
-            got = media_size.probe(os.path.join(DRIVE, p["rel"]), p["kind"], ffprobe)
+            got = media_size.probe(source(p["rel"]), p["kind"], ffprobe)
             entry = dict(drive_id=p["drive_id"], rel=p["rel"], kind=p["kind"], scan_w=p["w"], scan_h=p["h"])
             if got is None:
                 dropped.append(entry)
@@ -352,7 +387,7 @@ def main(argv=None):
     # capture times; files ordered by time, those without one last in the order above
     when = {}
     for k in keys:
-        path = os.path.join(DRIVE, pinfo[k]["rel"])
+        path = source(pinfo[k]["rel"])
         t = capture_time.exif_time(path, tz) if pinfo[k]["kind"] == "photo" else capture_time.video_time(path, ffprobe)
         if t is not None:
             when[k] = t
@@ -531,6 +566,7 @@ def main(argv=None):
                 faces=sorted([c, s] for c, s in face_from.items()),
                 hidden=sorted(hidden),
                 hidden_by_merge=sorted(hidden_eff - hidden),
+                from_previews=sum(not os.path.exists(os.path.join(DRIVE, pinfo[k]["rel"])) for k in keys),
                 photos=len(photo_keys),
                 videos=len(video_keys),
                 timed_photos=sum(k in when for k in photo_keys),

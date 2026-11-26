@@ -7,6 +7,12 @@ data/faces.tsv (one row per face), data/emb.npy (512-d, L2-normed, same order),
 data/photos.tsv (one row per file) and data/scan_stats.json.
 Each face also gets a roll estimate; faces rolled past fc.ROLL_MAX are re-embedded upright or
 marked fix=drop (see upright.py, which does the same for an existing cache).
+
+Previews ($ARMFUL_FOOTAGE/preview/preview.tsv, written by preview.py): a file listed there whose
+original is not in drive/ is scanned from its Drive thumbnail instead (a video from its poster
+frame, t=0), its face boxes scaled to the file's own size from the preview row. Its cache key is
+taken from "preview:" + its path, so once the original is downloaded under the same name it is
+scanned afresh and the preview is ignored.
 """
 import hashlib
 import json
@@ -64,6 +70,44 @@ def scan_image(path, k):
     return res, w, h, fc.image_sharpness(bgr)
 
 
+def preview_rows():
+    """rel -> preview.tsv row, for files ingested from previews only (preview.py)."""
+    p = os.path.join(fc.FOOTAGE, "preview", "preview.tsv")
+    out = {}
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            hdr = next(f).rstrip("\n").split("\t")
+            for line in f:
+                r = dict(zip(hdr, line.rstrip("\n").split("\t")))
+                out[os.path.join(r["subfolder"], r["name"]) if r["subfolder"] else r["name"]] = r
+    return out
+
+
+def scan_preview(row, k):
+    """Faces on a file's Drive thumbnail, boxes in the file's own w x h (from the preview row)."""
+    W, H = int(row["w"]), int(row["h"])
+    if not row["thumb"]:
+        return [], W, H, 0.0  # no thumbnail fetched: listed with no faces
+    bgr, _scale, (tw, th) = fc.load_image(os.path.join(fc.FOOTAGE, "preview", row["thumb"]))
+    s = (W / tw) if W and tw else 1.0  # thumbnail px -> file px (same aspect ratio)
+    if not (W and H):
+        W, H = tw, th
+    img_scale = bgr.shape[1] / tw  # load_image downscales past fc.MAX_SIDE
+    t = 0.0 if row["kind"] == "video" else -1.0
+    res = []
+    for i, f in enumerate(fc.faces(bgr)):
+        box = f["box"]
+        side = min(box[2] - box[0], box[3] - box[1]) / img_scale * s
+        crop = ""
+        if side >= MIN_CROP:
+            crop = f"{k}_{i}.jpg"
+            fc.save_crop(bgr, box, os.path.join(fc.CROPS, crop))
+        roll, fix, emb = fc.orient(bgr, box, f["emb"]) if crop else (None, "", f["emb"])
+        res.append(dict(t=t, box=[v / img_scale * s for v in box], det=f["det"], sharp=fc.sharpness(bgr, box),
+                        emb=emb, crop=crop, roll=roll, fix=fix))
+    return res, W, H, (fc.image_sharpness(bgr) if row["kind"] == "photo" else 0.0)
+
+
 def scan_video(path, k):
     res = []
     w = h = 0
@@ -96,6 +140,10 @@ def main():
             kind = "photo" if ext in fc.IMG_EXT else "video" if ext in fc.VID_EXT else None
             if kind:
                 files.append((os.path.relpath(os.path.join(dp, n), fc.DRIVE), kind))
+    on_disk = {rel for rel, _kind in files}
+    previews = {rel: r for rel, r in preview_rows().items() if rel not in on_disk}
+    for rel, r in previews.items():
+        files.append((rel, r["kind"]))
     files.sort()
     t0 = time.time()
     rows, embs, photos, errors = [], [], [], []
@@ -103,27 +151,32 @@ def main():
     fc.app()
     t_model = time.time()
     for n, (rel, kind) in enumerate(files, 1):
-        k = key(rel)
+        pv = previews.get(rel)
+        k = key("preview:" + rel if pv else rel)
         cache = os.path.join(fc.DATA, "per_file", k + ".json")
         cemb = os.path.join(fc.DATA, "per_file", k + ".npy")
         if os.path.exists(cache):
             with open(cache) as f:
                 meta = json.load(f)
             e = np.load(cemb) if os.path.exists(cemb) else np.zeros((0, 512), np.float32)
-        elif kind == "video" and not do_videos:
+        elif kind == "video" and not do_videos and not pv:
             continue
         else:
             try:
-                fn = scan_image if kind == "photo" else scan_video
                 ts = time.time()
-                res, w, h, isharp = fn(os.path.join(fc.DRIVE, rel), k)
+                if pv:
+                    res, w, h, isharp = scan_preview(pv, k)
+                else:
+                    fn = scan_image if kind == "photo" else scan_video
+                    res, w, h, isharp = fn(os.path.join(fc.DRIVE, rel), k)
                 secs = time.time() - ts
             except Exception as ex:  # noqa: BLE001
                 errors.append((rel, repr(ex)))
                 print(f"ERR {rel}: {ex}", flush=True)
                 continue
             e = np.stack([r.pop("emb") for r in res]) if res else np.zeros((0, 512), np.float32)
-            meta = dict(rel=rel, kind=kind, w=w, h=h, img_sharp=isharp, secs=round(secs, 3), faces=res)
+            meta = dict(rel=rel, kind=kind, w=w, h=h, img_sharp=isharp, secs=round(secs, 3), faces=res,
+                        **({"preview": pv["id"]} if pv else {}))
             # atomic: .npy first, then .json (the json is the "done" marker)
             with open(cemb + ".tmp", "wb") as f:
                 np.save(f, e)
@@ -132,7 +185,8 @@ def main():
                 json.dump(meta, f)
             os.replace(cache + ".tmp", cache)
         compute[kind] += meta.get("secs", 0.0)
-        photos.append((k, rel, kind, meta["w"], meta["h"], len(meta["faces"]), meta["img_sharp"], ids.get(rel, "")))
+        fid = pv["id"] if pv else ids.get(rel, "")
+        photos.append((k, rel, kind, meta["w"], meta["h"], len(meta["faces"]), meta["img_sharp"], fid))
         for i, r in enumerate(meta["faces"]):
             x1, y1, x2, y2 = r["box"]
             roll = r.get("roll")  # absent: cache from before the orientation pass (run upright.py)
@@ -157,6 +211,7 @@ def main():
         photos=sum(p[2] == "photo" for p in photos),
         videos=sum(p[2] == "video" for p in photos),
         faces=len(rows),
+        previews=len(previews),
         errors=errors,
         seconds_total=round(time.time() - t0, 1),
         seconds_model_load=round(t_model - t0, 1),
