@@ -6,7 +6,8 @@
 // shown as their host only). With $ARMFUL_CHROME_LOCK set, the run holds that lockfile
 // (lockf / flock) so only one headless Chrome runs at a time.
 // At 390x844 (phone) and 1440x900 (desktop): home, door, log in, wall, first screen of
-// thumbnails, the people list, a face filter + the hold, the previewer's large photo, close.
+// thumbnails, the people list, a face filter + the hold, the previewer's large photo, close; sharing:
+// the full-size photo by CORS and a video's first bytes through the gated __file/ stream.
 // Throughout: console errors, exceptions, failed loads, CSP violations, and the host of every
 // request: anything other than the site itself, drive.google.com and *.googleusercontent.com
 // fails. One `ok` / `FAIL` line per check; exit 1 if any failed, 2 if it could not run.
@@ -198,6 +199,17 @@ async function viewport(b, ev, [w, h, mobile]) {
     const ok = await b.until(`(() => { const i = document.querySelector('#lbStage img'); return !document.getElementById('lb').hidden && !!i && !i.classList.contains('soft') && i.naturalWidth >= ${want}; })()`, 20000);
     const nw = await b.evalJs(`document.querySelector('#lbStage img')?.naturalWidth || 0`);
     check(`${tag} previewer: the large photo loads (naturalWidth ${nw}${mobile ? "" : ", want >= 800"})`, ok, `naturalWidth ${nw}, open ${!(await b.evalJs("document.getElementById('lb').hidden"))}`);
+    // sharing: the share and link buttons are there, the full-size photo comes by CORS under the
+    // page's CSP (what the share button hands the share sheet), and a video's first bytes come
+    // through the gated __file/ stream (only on the desktop pass: once is enough)
+    check(`${tag} previewer: share and link buttons`, await b.evalJs(`['lbShare', 'lbLink'].every((id) => document.getElementById(id).getBoundingClientRect().width === 44)`));
+    if (!mobile) {
+      const f = await b.evalJs(`armful.getFile(+document.querySelector(${js(`#wall ${sel}`)}).dataset.n).then((x) => ({ size: x.size, type: x.type }), (e) => ({ err: String(e) }))`);
+      check(`${tag} share: the full-size photo fetches (${f.type || f.err}, ${f.size || 0} bytes)`, !f.err && f.size > 0 && /^image\//.test(f.type), JSON.stringify(f));
+      const v = await b.evalJs(`(() => { const i = armful.D.files.findIndex((x) => x.v); if (i < 0) return { none: true };
+        return fetch(armful.fileUrl(armful.D.files[i]), { headers: { Range: 'bytes=0-15' } }).then(async (r) => ({ status: r.status, type: r.headers.get('content-type'), n: (await r.arrayBuffer()).byteLength }), (e) => ({ err: String(e) })); })()`);
+      if (!v.none) check(`${tag} share: a video's first bytes come through __file/ (${v.status} ${v.type})`, (v.status === 206 || v.status === 200) && /^video\//.test(v.type || "") && v.n > 0, JSON.stringify(v));
+    }
     if (await b.evalJs(`document.getElementById('lb').hidden`)) check(`${tag} previewer: closes`, false, "it never opened");
     else { await b.key("Escape", 27); check(`${tag} previewer: closes`, await b.until(`document.getElementById('lb').hidden`, 5000)); }
   } catch (e) { check(`${tag} previewer`, false, scrub(e.message)); }

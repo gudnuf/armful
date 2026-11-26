@@ -7,7 +7,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { rmSync, readdirSync, readFileSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, createServer } from "node:http";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { door, SCRIPT, SCRIPT_HASH, CSP, FAVICON_SVG } from "../functions/_door.js";
@@ -52,9 +52,33 @@ const gate = (p, to = "") => post(SLUG, { p, to });
 const cookieOf = (r) => (r.headers.get("set-cookie") || "").split(";")[0];
 const notJson = (body) => { try { JSON.parse(body); return false; } catch { return true; } };
 
+// __file/<id>: a local stand-in for Drive's download host (the middleware honours a loopback
+// ARMFUL_FILE_UPSTREAM only). It records every request; VID_OK streams a QuickTime header, waits,
+// then the rest; VID_HTML answers an HTML page; anything else is a 500.
+const VID_OK = "VIDEOFILEID22abcdef", VID_HTML = "VIDEOFILEID26abcdef", PHOTO_ID = "PHOTOFILEID01abcdef";
+const HEAD = Buffer.from([0, 0, 0, 20, ...Buffer.from("ftypqt  "), 0, 0, 0, 0]);
+const TAIL = Buffer.alloc(200000, 7);
+let upstream, UPSTREAM_URL;
+const upstreamLog = [];
+before(async () => {
+  upstream = createServer((req, res) => {
+    upstreamLog.push({ url: req.url, range: req.headers.range || null, cookie: req.headers.cookie || null });
+    const id = new URL(req.url, "http://x").searchParams.get("id");
+    if (id === VID_OK) {
+      res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": String(HEAD.length + TAIL.length) });
+      res.write(HEAD);
+      setTimeout(() => res.end(TAIL), 1500);
+    } else if (id === VID_HTML) res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end("<html>virus scan</html>");
+    else res.writeHead(500).end();
+  });
+  await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
+  UPSTREAM_URL = `http://127.0.0.1:${upstream.address().port}`;
+});
+after(() => new Promise((r) => (upstream ? upstream.close(r) : r())));
+
 before(() => {
   WORK = makeWork([[SLUG, { title: TITLE, door_photo: "PLACEHOLDER_DOOR_ID", door_position: "center 30%" },
-    (data) => { data.files[0].i = DATA_CANARY; return data; }], [OTHER], [WEAK]]);
+    (data) => { data.files[0].i = DATA_CANARY; data.files[22].i = VID_OK; data.files[26].i = VID_HTML; data.files[1].i = PHOTO_ID; return data; }], [OTHER], [WEAK]]);
   const app = readdirSync(join(WORK, "dist", SLUG)).find((n) => /^app\.[0-9a-f]{10}\.js$/.test(n));
   ASSET = `/${SLUG}/${app}`;
   ASSET_HEAD = readFileSync(join(WORK, "dist", SLUG, app), "utf8").slice(0, 120);
@@ -189,7 +213,7 @@ describe("door() markup, no server", () => {
 });
 
 describe("with secrets set", () => {
-  before(() => start({ [key(SLUG)]: PASS, [key(OTHER)]: PASS, [key(WEAK)]: "x".repeat(5) }), { timeout: 180000 });
+  before(() => start({ [key(SLUG)]: PASS, [key(OTHER)]: PASS, [key(WEAK)]: "x".repeat(5), ARMFUL_FILE_UPSTREAM: UPSTREAM_URL }), { timeout: 180000 });
   after(stop);
 
   test("home is not gated", T, async () => {
@@ -489,13 +513,83 @@ describe("with secrets set", () => {
     }
   });
 
+  test("__file/<id> without the cookie (or with another collection's) is the door; Drive is never asked", T, async () => {
+    upstreamLog.length = 0;
+    const other = cookieOf(await post(OTHER, { p: PASS }));
+    for (const headers of [{}, { Cookie: `armful_${SLUG}=${other.split("=")[1]}` }, { Cookie: other }]) {
+      const r = await get(`/${SLUG}/__file/${VID_OK}`, headers);
+      assert.equal(r.status, 401, JSON.stringify(headers));
+      const body = await r.text();
+      assert.match(body, /<input type="password"/);
+      assert.ok(!body.includes("ftyp"));
+    }
+    assert.deepEqual(upstreamLog, []);
+  });
+
+  test("__file/<id> takes only a video id from this collection's data.json; no URL or host can be named", T, async () => {
+    const c = cookieOf(await gate(PASS));
+    upstreamLog.length = 0;
+    // not in the collection, a photo (not a video), or not an id at all: 404, Drive never asked
+    for (const id of ["NOTINTHECOLLECTION1", PHOTO_ID, "evil.example", "https:", "short", "x".repeat(201), `${VID_OK}/x`, ""]) {
+      const r = await get(`/${SLUG}/__file/${id}`, { Cookie: c });
+      assert.ok(r.status === 404 || r.status === 400, `${id} -> ${r.status}`);
+      assert.equal(await r.text(), "", id);
+    }
+    // encoded URLs, slashes and dots are refused by shape before anything else
+    for (const path of [`/${SLUG}/__file/https%3A%2F%2Fevil.example%2Fx`, `/${SLUG}/__file//evil.example/x`,
+      `/${SLUG}/__file/https://evil.example/x`]) {
+      const r = await raw(path, "GET", { Cookie: c });
+      assert.ok([400, 404].includes(r.status), `${path} -> ${r.status}`);
+      assert.ok(!r.body.includes('"files"'), path);
+    }
+    // another collection's video is not this one's (same password, its own cookie, its own data)
+    const oc = cookieOf(await post(OTHER, { p: PASS }));
+    assert.equal((await get(`/${OTHER}/__file/${VID_OK}`, { Cookie: oc })).status, 404);
+    assert.deepEqual(upstreamLog, [], "Drive was never asked");
+    // a query names nothing: the upstream URL is fixed, only the id goes in it, no cookie goes along
+    const r = await get(`/${SLUG}/__file/${VID_OK}?url=https://evil.example/&id=${PHOTO_ID}`, { Cookie: c });
+    assert.equal(r.status, 200);
+    await r.arrayBuffer();
+    assert.deepEqual(upstreamLog, [{ url: `/download?id=${VID_OK}&export=download&confirm=t`, range: null, cookie: null }]);
+    // only GET and HEAD
+    for (const method of ["POST", "PUT", "DELETE"]) assert.equal((await get(`/${SLUG}/__file/${VID_OK}`, { Cookie: c }, method)).status, 405, method);
+  });
+
+  test("__file/<id> streams the video through (first bytes before Drive has finished), typed and named, private", T, async () => {
+    const c = cookieOf(await gate(PASS));
+    const t0 = Date.now();
+    const r = await get(`/${SLUG}/__file/${VID_OK}`, { Cookie: c });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("content-type"), "video/quicktime");
+    assert.equal(r.headers.get("content-disposition"), `attachment; filename="${SLUG}-0023.mov"`);
+    assert.equal(r.headers.get("cache-control"), "private, no-store");
+    assert.equal(r.headers.get("x-content-type-options"), "nosniff");
+    assert.match(r.headers.get("x-robots-tag") || "", /noindex/);
+    assert.equal(r.headers.get("set-cookie"), null);
+    const rd = r.body.getReader(), parts = [];
+    const first = await rd.read();
+    const tFirst = Date.now() - t0;
+    parts.push(first.value);
+    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); }
+    const tAll = Date.now() - t0;
+    assert.ok(tFirst < 1200 && tAll >= 1400, `streamed, not buffered: first bytes at ${tFirst}ms, the end at ${tAll}ms`);
+    assert.ok(Buffer.concat(parts).equals(Buffer.concat([HEAD, TAIL])), "the bytes, unchanged");
+    // a Drive error page or failure is a 502, never passed on
+    for (const id of [VID_HTML, DATA_CANARY]) {
+      const e = await get(`/${SLUG}/__file/${id}`, { Cookie: c });
+      assert.equal(e.status, 502, id);
+      assert.equal(await e.text(), "", id);
+    }
+  });
+
   test("the gated page carries the page CSP; data, assets, door and home do not", T, async () => {
     const c = cookieOf(await gate(PASS));
     const page = await get(`/${SLUG}/`, { Cookie: c });
     assert.equal(page.status, 200);
     assert.equal(page.headers.get("content-security-policy"), PAGE_CSP);
     for (const d of ["default-src 'self'", "script-src 'self'", "frame-src https://drive.google.com",
-      "img-src 'self' https://drive.google.com https://*.googleusercontent.com data:", "base-uri 'none'", "frame-ancestors 'none'"]) {
+      "img-src 'self' https://drive.google.com https://*.googleusercontent.com data:", "base-uri 'none'", "frame-ancestors 'none'",
+      "connect-src 'self' https://lh3.googleusercontent.com;"]) {
       assert.ok(PAGE_CSP.includes(d), d);
     }
     for (const path of [`/${SLUG}/data.json`, ASSET]) assert.equal((await get(path, { Cookie: c })).headers.get("content-security-policy"), null, path);

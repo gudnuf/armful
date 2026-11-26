@@ -100,7 +100,9 @@ unset ARMFUL_PASSWORD
 `bin/smoke-browser.mjs` drives headless Chrome (set `ARMFUL_CHROME_LOCK` to
 hold a lockfile while it runs) at 390x844 and 1440x900: home, door, typed
 login, one tile per `data.json` file, the first screen of thumbnails, the
-people list's faces, a face filter and the hold, the previewer's large photo.
+people list's faces, a face filter and the hold, the previewer's large photo,
+and sharing (the full-size photo fetched by CORS, a video's first bytes through the gated
+`/<slug>/__file/<id>` stream).
 It fails on any console error, uncaught exception, failed load, CSP violation
 or request to a host other than the site, `drive.google.com` and
 `*.googleusercontent.com`; a third-party script an ad blocker stopped is

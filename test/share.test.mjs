@@ -221,8 +221,9 @@ test("select mode: long press starts it, taps add and remove, a check and a coun
     let s = await selState();
     assert.deepEqual([s.on, s.bar, s.n, s.sel, s.lb], [true, true, "1", [a], false], `${w}: the long press chose it and opened nothing`);
     // the check: a filled disc on the chosen tile's corner
-    const chk = await b.evalJs(`(() => { const t = ${tile(a)}, x = getComputedStyle(t, '::after'), o = getComputedStyle(${tile(c)}, '::after');
-      return { chosen: x.content !== 'none' && x.backgroundImage.startsWith('url('), other: o.content !== 'none' && o.backgroundImage === 'none' }; })()`);
+    const chk = await b.evalJs(`(() => { const t = ${tile(a)}, x = getComputedStyle(t, '::before'), o = getComputedStyle(${tile(c)}, '::before'),
+      ring = getComputedStyle(${tile(c)}, '::after').content;
+      return { chosen: x.content !== 'none' && x.borderRightWidth === '2px', other: o.content === 'none' && ring !== 'none' }; })()`);
     assert.deepEqual(chk, { chosen: true, other: true }, `${w}: a check on the chosen, an empty ring on the rest`);
     await press(tile(c)); await press(tile(d));
     s = await selState();

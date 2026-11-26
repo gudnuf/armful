@@ -7,7 +7,8 @@
 // Run: node --test test/door.test.mjs (bin/check.sh serialises the Chrome suites when ARMFUL_CHROME_LOCK is set)
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { rmSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { launch, sleep } from "./cdp.mjs";
 import { makeWork, start, stop, key } from "./wrangler.mjs";
 
@@ -79,6 +80,26 @@ test("with script: a wrong password shakes in place, the right one lands on the 
   assert.ok(await until(`document.querySelectorAll('#wall .tile').length > 0`, 15000), "the wall draws");
   // the door is gone from history: back does not return to it
   assert.equal(await b.evalJs(`history.length`), 2, "about:blank, then the collection (the door replaced)");
+});
+
+test("a shared view's link survives the door: the query and the open photo land as they were sent", T, async () => {
+  const D = JSON.parse(readFileSync(join(WORK, "dist", SLUG, "data.json"), "utf8"));
+  const i = D.files.findIndex((f, k) => k > 0 && !f.v && f.w > 0 && f.p.includes(1) && f.p.includes(2));
+  const shared = `#p=1.2&m=f&o=${D.files[i].i}`;
+  for (const script of [true, false]) { // the door's script posts by fetch; without it, the plain form (the hash rides in "to")
+    await b.cdp("Network.clearBrowserCookies");
+    await b.navigate("about:blank");
+    await b.navigate(`${base}/${SLUG}/${shared}`);
+    assert.ok(await until(`!!document.querySelector('form.door')`), "the door");
+    if (!script) await b.evalJs(`document.querySelector('form.door').onsubmit = null; document.querySelector('form.door').addEventListener('submit', (e) => e.stopImmediatePropagation(), true)`);
+    await type(PASS);
+    await enter();
+    assert.ok(await until(ON_COLLECTION, 15000), `lands on the collection (${script ? "fetch" : "form"})`);
+    assert.ok(await until(`!document.getElementById('lb').hidden`, 15000), "the shared photo opens");
+    const s = await b.evalJs(`({ hash: location.hash, picked: armful.state.picked, m: armful.state.m,
+      open: armful.D.files[[...document.querySelectorAll('#wall .tile')].filter((t) => !t.hidden).map((t) => +t.dataset.n)[armful.state.lb]].i })`);
+    assert.deepEqual(s, { hash: "#p=1.2&m=f", picked: [1, 2], m: "f", open: D.files[i].i }, script ? "fetch" : "form");
+  }
 });
 
 test("without script: the plain form POST still works (401 door with .wrong, then 303 to the collection)", T, async () => {
